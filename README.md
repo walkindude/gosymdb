@@ -21,7 +21,7 @@ gosymdb find --q Store --json
 gosymdb trace --symbol MyFunc --json
 
 # What breaks if I change this?
-gosymdb blast-radius --symbol 'pkg.(*T).Method' --depth 5 --json
+gosymdb blast-radius --symbol 'github.com/walkindude/gosymdb/indexer.IndexModule' --depth 5 --json
 ```
 
 ## Commands
@@ -55,6 +55,10 @@ gosymdb uses `go/packages` (the same loader the Go compiler uses) to parse and t
 - **Type references**: assertions, switches, composite literals, conversions, field access, embedding
 
 Everything is stored in a single SQLite file for fast, offline querying.
+
+## Privacy
+
+gosymdb runs **entirely on your machine**. It does not send your source code, symbols, or any data to external servers. There is no telemetry, no phoning home, no network access of any kind. The SQLite database stays on your local disk.
 
 ## Agent integration
 

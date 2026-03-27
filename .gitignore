@@ -4,4 +4,5 @@ gosymdb
 gosymdb-*
 cmd.test.exe
 bench_history.jsonl
-testbench/testbench.sqlite
+dist/
+coverage.out

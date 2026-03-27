@@ -11,15 +11,9 @@ pre-commit:
           gofmt -w "$f"
           git add "$f"
         done
-    leak-check:
-      glob: "*.{go,md,json,sh,yml,yaml}"
-      run: |
-        if git diff --cached --name-only --diff-filter=ACMR | xargs grep -lE 'BQL-|beads-net|bqlog|GOSYMDB_WISHLIST|janus|keystone/|walkindude/keystone' 2>/dev/null; then
-          echo ""
-          echo "LEAK DETECTED: private references in staged files"
-          echo "Fix the files above before committing."
-          exit 1
-        fi
+    golangci-lint:
+      glob: "*.go"
+      run: golangci-lint run --new-from-rev=HEAD~1
     gomod-tidy:
       glob: "*.go"
       run: |

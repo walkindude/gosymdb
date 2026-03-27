@@ -1,0 +1,54 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - errcheck
+    - gocritic
+    - gosec
+    - nolintlint
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - (*github.com/walkindude/gosymdb/store/sqlite.SQLiteStore).Close
+    gosec:
+      excludes:
+        - G104
+        - G202
+        - G204
+        - G301
+        - G302
+        - G304
+        - G306
+        - G703
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - staticcheck
+          - unused
+          - errcheck
+          - gosec
+    paths:
+      - testbench
+      - testdata
+
+formatters:
+  enable:
+    - gofmt

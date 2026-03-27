@@ -16,8 +16,8 @@ testbench:
 	go test ./internal/cmd/... -run TestBench -count=1
 
 lint:
-	gofmt -l . | grep . && exit 1 || true
-	go vet ./...
+	golangci-lint run
+	@echo "Lint: OK"
 
 clean:
 	rm -f gosymdb gosymdb-* *.sqlite

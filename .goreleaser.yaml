@@ -9,6 +9,7 @@ before:
 builds:
   - main: .
     binary: gosymdb
+    flags: ["-trimpath"]
     ldflags:
       - -s -w
       - -X github.com/walkindude/gosymdb/internal/cmd.Version={{.Version}}
@@ -29,13 +30,31 @@ archives:
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
+release:
+  prerelease: auto
+
 checksum:
   name_template: "checksums.txt"
 
 changelog:
   sort: asc
+  use: git
+  abbrev: 7
+  groups:
+    - title: "Features"
+      regexp: '^feat'
+    - title: "Bug Fixes"
+      regexp: '^fix'
+    - title: "Performance"
+      regexp: '^perf'
+    - title: "Refactoring"
+      regexp: '^refactor'
+    - title: "Other"
+      order: 999
   filters:
     exclude:
       - "^chore:"
       - "^docs:"
       - "^test:"
+      - "^ci:"
+      - "^style:"

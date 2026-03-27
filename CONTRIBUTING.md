@@ -43,17 +43,27 @@ To add a new test module:
 
 ## Commit conventions
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
+Use [Conventional Commits](https://www.conventionalcommits.org/). The release
+changelog is auto-generated from these prefixes — using the wrong prefix means
+your change shows up in the wrong section or gets filtered out entirely.
 
-- `feat:` — new feature
+**Appear in the changelog:**
+- `feat:` — new feature or command
 - `fix:` — bug fix
-- `test:` — test-only changes
-- `docs:` — documentation
-- `refactor:` — code change that neither fixes a bug nor adds a feature
-- `chore:` — maintenance (deps, CI, etc.)
+- `perf:` — performance improvement (no functional change)
+- `refactor:` — code restructuring (no functional change)
+
+**Filtered out of the changelog** (still valid commits):
+- `test:` — test-only changes (new testbench modules, assertions)
+- `docs:` — documentation only
+- `chore:` — maintenance (deps, formatting, config)
+- `ci:` — CI/CD changes (workflows, goreleaser, lefthook)
+- `style:` — code style (gofmt, whitespace)
+
+Scopes are optional: `fix(indexer):`, `feat(callers):`, etc.
 
 ## Pre-commit hooks
 
 Lefthook runs on every commit:
 - `gofmt` on staged `.go` files
-- Leak pattern scan (rejects private references that shouldn't be in this repo)
+- `go mod tidy` with drift check

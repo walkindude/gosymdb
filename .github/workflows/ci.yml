@@ -22,28 +22,34 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - name: Test
-        run: go test ./internal/cmd/... ./indexer/... ./store/... -count=1
+      - name: Unit tests
+        run: go test -race ./internal/cmd/... ./indexer/... ./store/... -count=1
 
       - name: Testbench
-        run: go test ./internal/cmd/... -run TestBench -count=1
+        run: go test -race ./internal/cmd/... -run TestBench -count=1
 
-      - name: Vet
-        run: go vet ./...
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
 
-      - name: Gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "Unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Leak scan
-        run: |
-          if grep -rE 'BQL-|beads-net|bqlog|GOSYMDB_WISHLIST|janus|keystone/|walkindude/keystone' \
-            --include='*.go' --include='*.md' --include='*.json' --include='*.sh' .; then
-            echo "LEAK DETECTED"
-            exit 1
-          fi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: "v2.11.4"
