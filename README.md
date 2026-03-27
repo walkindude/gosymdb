@@ -72,6 +72,22 @@ gosymdb is designed for AI coding agents. Every command produces structured JSON
 
 Run `gosymdb agent-context` at the start of any agent session to get the full command reference.
 
+### Claude Code plugin
+
+gosymdb ships as a [Claude Code plugin](https://docs.anthropic.com/en/docs/claude-code/plugins) with three skills:
+
+- **sym** — find a Go symbol (replaces grep/rg for definition lookup)
+- **trace** — full symbol profile in one call (def + callers + callees + blast radius)
+- **impact** — check what breaks before changing a symbol
+
+Install locally:
+
+```bash
+claude plugin install --dir /path/to/gosymdb
+```
+
+The plugin handles binary installation, index creation, and stale-index detection automatically.
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
