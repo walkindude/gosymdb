@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./internal/cmd/... ./indexer/... ./store/... -count=1
+
+      - name: Testbench
+        run: go test ./internal/cmd/... -run TestBench -count=1
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Leak scan
+        run: |
+          if grep -rE 'BQL-|beads-net|bqlog|GOSYMDB_WISHLIST|janus|keystone/|walkindude/keystone' \
+            --include='*.go' --include='*.md' --include='*.json' --include='*.sh' .; then
+            echo "LEAK DETECTED"
+            exit 1
+          fi
