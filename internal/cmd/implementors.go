@@ -46,8 +46,10 @@ func newImplementorsCmd() *cobra.Command {
 }
 
 func execImplementors(rs store.ReadStore, dbPath, iface, typ string, limit int, asJSON bool) error {
-	if strings.TrimSpace(iface) == "" && strings.TrimSpace(typ) == "" {
-		return errors.New("--iface or --type is required")
+	iface = strings.TrimSpace(iface)
+	typ = strings.TrimSpace(typ)
+	if (iface == "") == (typ == "") {
+		return errors.New("exactly one of --iface or --type is required")
 	}
 
 	ctx := context.Background()
