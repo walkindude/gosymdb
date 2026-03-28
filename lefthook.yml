@@ -13,7 +13,7 @@ pre-commit:
         done
     golangci-lint:
       glob: "*.go"
-      run: golangci-lint run --new-from-rev=HEAD~1
+      run: ./tools/golangci-lint.sh run --new-from-rev=HEAD~1
     gomod-tidy:
       glob: "*.go"
       run: |

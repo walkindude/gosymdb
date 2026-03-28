@@ -32,28 +32,28 @@ func formatExplainText(explain *explainPayload) string {
 
 	var b strings.Builder
 	b.WriteString("explain:\n")
-	b.WriteString(fmt.Sprintf("  command: %s\n", explain.Command))
+	fmt.Fprintf(&b, "  command: %s\n", explain.Command)
 	if explain.Input != "" {
-		b.WriteString(fmt.Sprintf("  input: %s\n", explain.Input))
+		fmt.Fprintf(&b, "  input: %s\n", explain.Input)
 	}
 	if explain.Mode != "" {
-		b.WriteString(fmt.Sprintf("  mode: %s\n", explain.Mode))
+		fmt.Fprintf(&b, "  mode: %s\n", explain.Mode)
 	}
 	if explain.ResolvedSymbol != "" {
-		b.WriteString(fmt.Sprintf("  resolved_symbol: %s\n", explain.ResolvedSymbol))
+		fmt.Fprintf(&b, "  resolved_symbol: %s\n", explain.ResolvedSymbol)
 	}
 	if explain.NormalizedQuery != "" {
-		b.WriteString(fmt.Sprintf("  normalized_query: %s\n", explain.NormalizedQuery))
+		fmt.Fprintf(&b, "  normalized_query: %s\n", explain.NormalizedQuery)
 	}
 	if explain.Resolution != "" {
-		b.WriteString(fmt.Sprintf("  resolution: %s\n", explain.Resolution))
+		fmt.Fprintf(&b, "  resolution: %s\n", explain.Resolution)
 	}
 	writeExplainMap(&b, "filters", explain.Filters)
 	writeExplainMap(&b, "traversal", explain.Traversal)
 	if len(explain.Notes) > 0 {
 		b.WriteString("  notes:\n")
 		for _, note := range explain.Notes {
-			b.WriteString(fmt.Sprintf("    - %s\n", note))
+			fmt.Fprintf(&b, "    - %s\n", note)
 		}
 	}
 	return b.String()
@@ -68,9 +68,9 @@ func writeExplainMap(b *strings.Builder, label string, values map[string]any) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	b.WriteString(fmt.Sprintf("  %s:\n", label))
+	fmt.Fprintf(b, "  %s:\n", label)
 	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("    %s: %s\n", k, formatExplainValue(values[k])))
+		fmt.Fprintf(b, "    %s: %s\n", k, formatExplainValue(values[k]))
 	}
 }
 
