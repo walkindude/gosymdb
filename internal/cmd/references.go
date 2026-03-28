@@ -55,6 +55,9 @@ func execReferences(rs store.ReadStore, dbPath, symbol, pkg, refKind, from strin
 	if strings.TrimSpace(symbol) == "" {
 		return errors.New("--symbol is required")
 	}
+	if err := validateEnumFlag("--ref-kind", refKind, refKinds); err != nil {
+		return err
+	}
 
 	ctx := context.Background()
 

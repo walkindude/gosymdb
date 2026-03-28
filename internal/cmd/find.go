@@ -50,6 +50,10 @@ func newFindCmd() *cobra.Command {
 }
 
 func execFind(rs store.ReadStore, dbPath, query, pkg, kind, file string, limit int, countOnly, asJSON bool) error {
+	if err := validateEnumFlag("--kind", kind, findKinds); err != nil {
+		return err
+	}
+
 	opts := store.FindOpts{
 		Query: query,
 		Pkg:   pkg,

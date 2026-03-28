@@ -224,7 +224,7 @@ func appendBenchHistory(testbenchRoot string, started time.Time, modules, symbol
 func bCallers(t *testing.T, e *benchEnv, symbol string) map[string]any {
 	t.Helper()
 	return benchCapture(t, func() {
-		if err := execCallers(e.rs, e.db, symbol, 200, false, "", false, 1, false, false, true, e.dbPath); err != nil {
+		if err := execCallers(e.rs, e.db, symbol, 200, false, "", false, 1, false, false, true, false, e.dbPath); err != nil {
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		}
 	})
@@ -260,7 +260,7 @@ func bDead(t *testing.T, e *benchEnv, pkg string, inclExported bool) map[string]
 func bBlast(t *testing.T, e *benchEnv, symbol string) map[string]any {
 	t.Helper()
 	return benchCapture(t, func() {
-		if err := execBlastRadius(e.rs, e.db, symbol, 5, false, "", false, 200, true, e.dbPath); err != nil {
+		if err := execBlastRadius(e.rs, e.db, symbol, 5, false, "", false, 200, true, false, e.dbPath); err != nil {
 			// Write a JSON error so benchCapture can still parse
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		}
@@ -270,7 +270,7 @@ func bBlast(t *testing.T, e *benchEnv, symbol string) map[string]any {
 func bImpls(t *testing.T, e *benchEnv, iface string) map[string]any {
 	t.Helper()
 	return benchCapture(t, func() {
-		if err := execImplementors(e.rs, e.dbPath, iface, "", 100, true); err != nil {
+		if err := execImplementors(e.rs, e.dbPath, iface, "", 100, true, false); err != nil {
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		}
 	})
@@ -759,7 +759,7 @@ func bench23(t *testing.T, e *benchEnv) {
 	pkg := "testbench/blast_pkg_filter/use"
 
 	callers := benchCapture(t, func() {
-		if err := execCallers(e.rs, e.db, symbol, 200, false, pkg, false, 5, false, false, true, e.dbPath); err != nil {
+		if err := execCallers(e.rs, e.db, symbol, 200, false, pkg, false, 5, false, false, true, false, e.dbPath); err != nil {
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		}
 	})
@@ -771,7 +771,7 @@ func bench23(t *testing.T, e *benchEnv) {
 	}
 
 	blast := benchCapture(t, func() {
-		if err := execBlastRadius(e.rs, e.db, symbol, 5, false, pkg, false, 200, true, e.dbPath); err != nil {
+		if err := execBlastRadius(e.rs, e.db, symbol, 5, false, pkg, false, 200, true, false, e.dbPath); err != nil {
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		}
 	})

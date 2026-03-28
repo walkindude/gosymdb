@@ -33,7 +33,7 @@ type agentFlag struct {
 }
 
 // errorContract is the shared error contract emitted on every command spec.
-const errorContract = `Exit 1. When --json is set, errors are written to stdout as JSON: {"error":"...","error_code":"...","flag":"...","recovery":"...","hint":"..."}. error_code values: missing_required_flag, no_database, unknown_command_or_flag. Empty results return empty array/zero counts, not an error.`
+const errorContract = `Exit 1. When --json is set, errors are written to stdout as JSON: {"error":"...","error_code":"...","flag":"...","value":"...","valid_values":[...],"recovery":"...","hint":"..."}. error_code values: missing_required_flag, invalid_flag_value, no_database, unknown_command_or_flag. Empty results return empty array/zero counts, not an error.`
 
 var helpSpecs = map[string]agentHelp{
 	"gosymdb": {
@@ -65,7 +65,7 @@ var helpSpecs = map[string]agentHelp{
 			`All symbol-bearing --json outputs include both fqname (full qualified) and name (short name after package path). Examples: fqname=github.com/walkindude/gosymdb/cmd.Execute → name=Execute; fqname=testbench/method_exprs.*Calculator.Add → name=*Calculator.Add.`,
 			"find/def/callers/callees/dead/blast-radius all include package_path in JSON output.",
 			"kind=interface is now distinct from kind=type in the index.",
-			`Errors with --json: stdout JSON {"error":"...","error_code":"...","hint":"...","recovery":"..."}. error_code: missing_required_flag | no_database | unknown_command_or_flag. unknown_command_or_flag includes a valid_subcommands list — you may be hallucinating that flag/command.`,
+			`Errors with --json: stdout JSON {"error":"...","error_code":"...","hint":"...","recovery":"...","value":"...","valid_values":[...]}. error_code: missing_required_flag | invalid_flag_value | no_database | unknown_command_or_flag. unknown_command_or_flag includes a valid_subcommands list — you may be hallucinating that flag/command.`,
 			`--count flag on callers/callees/find: prints just the integer count to stdout (no JSON, no env). Shell usage: count=$(gosymdb callers --symbol Foo --count); [ "$count" -ge 1 ]`,
 			`Recommended JSON parser for shell pipelines: jq. Examples: gosymdb callers --symbol Foo --json | jq '.callers_count'; gosymdb find --q Bar --json | jq '[.symbols[].name]'; gosymdb health --json | jq '{symbols,calls,unresolved}'`,
 		},
@@ -186,6 +186,7 @@ var helpSpecs = map[string]agentHelp{
 			{Name: "--is-test", Type: "bool", Default: "false", Description: "Only return callers from test files (*_test.go)."},
 			{Name: "--include-unresolved", Type: "bool", Default: "false", Description: "Also return unresolved references."},
 			{Name: "--count", Type: "bool", Default: "false", Description: "Print only the integer count to stdout (no JSON envelope). For shell: count=$(gosymdb callers --symbol X --count)."},
+			{Name: "--explain", Type: "bool", Default: "false", Description: "Show normalized inputs, active filters, and traversal settings."},
 			{Name: "--limit", Type: "int", Default: "200", Description: "Row limit (applies per BFS hop)."},
 			{Name: "--json", Type: "bool", Default: "false", Description: "JSON output."},
 		},
@@ -219,6 +220,7 @@ var helpSpecs = map[string]agentHelp{
 			{Name: "--depth", Type: "int", Default: "3", Description: "Max traversal depth (cap: 10)."},
 			{Name: "--pkg", Type: "string", Default: "", Description: "Restrict results to callers in this package path prefix."},
 			{Name: "--exclude-tests", Type: "bool", Default: "false", Description: "Omit test callers from results and traversal."},
+			{Name: "--explain", Type: "bool", Default: "false", Description: "Show normalized inputs and recursive traversal filters."},
 			{Name: "--limit", Type: "int", Default: "500", Description: "Row limit."},
 			{Name: "--json", Type: "bool", Default: "false", Description: "JSON output."},
 		},
@@ -379,6 +381,7 @@ var helpSpecs = map[string]agentHelp{
 			{Name: "--db", Type: "string", Default: "gosymdb.sqlite", Description: "SQLite path."},
 			{Name: "--iface", Type: "string", Default: "", Description: "Partial interface fqname → returns implementing types. Required unless --type given."},
 			{Name: "--type", Type: "string", Default: "", Description: "Partial type fqname → returns satisfied interfaces. Required unless --iface given."},
+			{Name: "--explain", Type: "bool", Default: "false", Description: "Show normalized mode and query matching details."},
 			{Name: "--limit", Type: "int", Default: "200", Description: "Row limit."},
 			{Name: "--json", Type: "bool", Default: "false", Description: "JSON output."},
 		},
