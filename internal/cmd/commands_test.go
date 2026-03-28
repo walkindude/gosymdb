@@ -1003,6 +1003,24 @@ func TestImplementorsRequiresIfaceOrType(t *testing.T) {
 	}
 }
 
+func TestImplementorsRejectsIfaceAndTypeTogether(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x.sqlite")
+	db, _ := sql.Open(sqlite.DriverName, dbPath)
+	indexer.ResetSchema(db)
+	db.Close()
+
+	st, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	defer st.Close()
+
+	err = execImplementors(st, dbPath, "iface.Doer", "RealDoer", 200, false)
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected mutually-exclusive flag error; got: %v", err)
+	}
+}
+
 func TestImplementorsNoFalsePositives(t *testing.T) {
 	db := indexSamplemod(t)
 

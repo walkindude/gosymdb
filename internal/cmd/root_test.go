@@ -122,6 +122,15 @@ func TestIsDBExemptCmdAgentContextIsExempt(t *testing.T) {
 	}
 }
 
+func TestIsDBExemptCmdHelpIsExempt(t *testing.T) {
+	root := &cobra.Command{Use: "gosymdb"}
+	sub := &cobra.Command{Use: "help"}
+	root.AddCommand(sub)
+	if !isDBExemptCmd(sub) {
+		t.Error("'help' subcommand must be exempt so gosymdb help works without a database")
+	}
+}
+
 func TestIsDBExemptCmdReadCommandIsNotExempt(t *testing.T) {
 	root := &cobra.Command{Use: "gosymdb"}
 	for _, name := range []string{"find", "callers", "callees", "def", "health", "dead", "blast-radius", "packages", "implementors"} {
