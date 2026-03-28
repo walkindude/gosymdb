@@ -997,9 +997,9 @@ func TestImplementorsRequiresIfaceOrType(t *testing.T) {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
 	defer st.Close()
-	err = execImplementors(st, dbPath, "", "", 200, false)
-	if err == nil || !strings.Contains(err.Error(), "--iface or --type is required") {
-		t.Fatalf("expected --iface or --type required error; got: %v", err)
+	err = execImplementors(st, dbPath, "", "", 200, false, false)
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected exactly-one mode error; got: %v", err)
 	}
 }
 
@@ -1015,7 +1015,7 @@ func TestImplementorsRejectsIfaceAndTypeTogether(t *testing.T) {
 	}
 	defer st.Close()
 
-	err = execImplementors(st, dbPath, "iface.Doer", "RealDoer", 200, false)
+	err = execImplementors(st, dbPath, "iface.Doer", "RealDoer", 200, false, false)
 	if err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("expected mutually-exclusive flag error; got: %v", err)
 	}
@@ -1114,7 +1114,7 @@ func TestBlastRadiusRequiresSymbol(t *testing.T) {
 	db2, _ := sql.Open(sqlite.DriverName, dbPath)
 	defer db2.Close()
 
-	err = execBlastRadius(rs, db2, "", 3, false, "", false, 500, false, dbPath)
+	err = execBlastRadius(rs, db2, "", 3, false, "", false, 500, false, false, dbPath)
 	if err == nil || !strings.Contains(err.Error(), "--symbol is required") {
 		t.Fatalf("expected --symbol required error, got: %v", err)
 	}
@@ -1306,7 +1306,7 @@ func TestBUG005_HintInCallersJSONOutput(t *testing.T) {
 	db2, _ := sql.Open(sqlite.DriverName, dbPath)
 	defer db2.Close()
 
-	execErr := execCallers(rs, db2, "testbench/interface_dispatch.*FileWriter.Write", 200, false, "", false, 1, false, false, true, dbPath)
+	execErr := execCallers(rs, db2, "testbench/interface_dispatch.*FileWriter.Write", 200, false, "", false, 1, false, false, true, false, dbPath)
 
 	w.Close()
 	os.Stdout = old
@@ -1349,7 +1349,7 @@ func execCallersJSON(t *testing.T, dbPath, symbol string, limit int, fuzzy bool,
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdout = w
-	execErr := execCallers(rs, db2, symbol, limit, fuzzy, pkg, includeUnresolved, depth, isTest, false, true, dbPath)
+	execErr := execCallers(rs, db2, symbol, limit, fuzzy, pkg, includeUnresolved, depth, isTest, false, true, false, dbPath)
 	w.Close()
 	os.Stdout = old
 	var buf strings.Builder
@@ -1990,7 +1990,7 @@ func TestInterfaceDispatchHintNonMethod(t *testing.T) {
 func TestCallersJSONOutput(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, false, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, false, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers: %v", err)
 		}
 	})
@@ -2002,17 +2002,36 @@ func TestCallersJSONOutput(t *testing.T) {
 	}
 }
 
+func TestCallersExplainJSONOutput(t *testing.T) {
+	db, rs, dbPath := indexSamplemodWithPath(t)
+	m := captureJSON(t, func() {
+		if err := execCallers(rs, db, "Top", 200, true, "example.com/samplemod/alpha", false, 2, false, false, true, true, dbPath); err != nil {
+			t.Fatalf("execCallers explain: %v", err)
+		}
+	})
+	explain, ok := m["explain"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected explain payload; got %v", m["explain"])
+	}
+	if explain["command"] != "callers" {
+		t.Fatalf("expected callers explain payload; got %v", explain)
+	}
+	if explain["resolved_symbol"] == "" {
+		t.Fatalf("expected resolved_symbol in explain payload; got %v", explain)
+	}
+}
+
 func TestCallersCountOnly(t *testing.T) {
 	db, rs, _ := indexSamplemodWithPath(t)
 	// countOnly mode should not panic.
-	if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, false, true, false, ""); err != nil {
+	if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, false, true, false, false, ""); err != nil {
 		t.Fatalf("execCallers count: %v", err)
 	}
 }
 
 func TestCallersTextOutput(t *testing.T) {
 	db, rs, _ := indexSamplemodWithPath(t)
-	if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, false, false, false, ""); err != nil {
+	if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, false, false, false, false, ""); err != nil {
 		t.Fatalf("execCallers text: %v", err)
 	}
 }
@@ -2020,7 +2039,7 @@ func TestCallersTextOutput(t *testing.T) {
 func TestCallersFuzzyMode(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "Top", 200, true, "", false, 1, false, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "Top", 200, true, "", false, 1, false, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers fuzzy: %v", err)
 		}
 	})
@@ -2032,7 +2051,7 @@ func TestCallersFuzzyMode(t *testing.T) {
 func TestCallersWithDepth(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 3, false, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 3, false, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers depth: %v", err)
 		}
 	})
@@ -2044,7 +2063,7 @@ func TestCallersWithDepth(t *testing.T) {
 func TestCallersIncludeUnresolved(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", true, 1, false, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", true, 1, false, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers unresolved: %v", err)
 		}
 	})
@@ -2056,7 +2075,7 @@ func TestCallersIncludeUnresolved(t *testing.T) {
 func TestCallersHintForUnknownSymbol(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "example.com/nonexistent.Foo", 200, false, "", false, 1, false, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "example.com/nonexistent.Foo", 200, false, "", false, 1, false, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers: %v", err)
 		}
 	})
@@ -2070,7 +2089,7 @@ func TestCallersHintForUnknownSymbol(t *testing.T) {
 func TestBlastRadiusJSONOutput(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execBlastRadius(rs, db, "example.com/samplemod/alpha.Top", 3, false, "", false, 200, true, dbPath); err != nil {
+		if err := execBlastRadius(rs, db, "example.com/samplemod/alpha.Top", 3, false, "", false, 200, true, false, dbPath); err != nil {
 			t.Fatalf("execBlastRadius: %v", err)
 		}
 	})
@@ -2082,16 +2101,33 @@ func TestBlastRadiusJSONOutput(t *testing.T) {
 	}
 }
 
+func TestBlastRadiusExplainJSONOutput(t *testing.T) {
+	db, rs, dbPath := indexSamplemodWithPath(t)
+	m := captureJSON(t, func() {
+		if err := execBlastRadius(rs, db, "Top", 3, true, "example.com/samplemod/alpha", false, 200, true, true, dbPath); err != nil {
+			t.Fatalf("execBlastRadius explain: %v", err)
+		}
+	})
+	explain, ok := m["explain"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected explain payload; got %v", m["explain"])
+	}
+	traversal, ok := explain["traversal"].(map[string]any)
+	if !ok || traversal["seed_match"] == nil {
+		t.Fatalf("expected traversal.seed_match in explain payload; got %v", explain)
+	}
+}
+
 func TestBlastRadiusTextOutput(t *testing.T) {
 	db, rs, _ := indexSamplemodWithPath(t)
-	if err := execBlastRadius(rs, db, "example.com/samplemod/alpha.Top", 3, false, "", false, 200, false, ""); err != nil {
+	if err := execBlastRadius(rs, db, "example.com/samplemod/alpha.Top", 3, false, "", false, 200, false, false, ""); err != nil {
 		t.Fatalf("execBlastRadius text: %v", err)
 	}
 }
 
 func TestBlastRadiusEmptySymbol(t *testing.T) {
 	db, rs, _ := indexSamplemodWithPath(t)
-	err := execBlastRadius(rs, db, "", 3, false, "", false, 200, true, "")
+	err := execBlastRadius(rs, db, "", 3, false, "", false, 200, true, false, "")
 	if err == nil {
 		t.Fatal("expected error for empty symbol")
 	}
@@ -2231,6 +2267,49 @@ func TestReferencesJSONWithRefKind(t *testing.T) {
 	}
 }
 
+func TestFindRejectsInvalidKind(t *testing.T) {
+	_, rs, dbPath := indexSamplemodWithPath(t)
+	err := execFind(rs, dbPath, "Store", "", "metho", "", 100, false, true)
+	if err == nil || !strings.Contains(err.Error(), "invalid value for --kind") {
+		t.Fatalf("expected invalid --kind error; got: %v", err)
+	}
+}
+
+func TestDeadRejectsInvalidKind(t *testing.T) {
+	db, rs, dbPath := indexSamplemodWithPath(t)
+	err := execDead(rs, db, "type", "", 100, false, true, dbPath)
+	if err == nil || !strings.Contains(err.Error(), "invalid value for --kind") {
+		t.Fatalf("expected invalid dead --kind error; got: %v", err)
+	}
+}
+
+func TestReferencesRejectInvalidRefKind(t *testing.T) {
+	_, rs, dbPath := indexSamplemodWithPath(t)
+	err := execReferences(rs, dbPath, "example.com/samplemod/alpha.Store", "", "field-read", "", 200, false, true)
+	if err == nil || !strings.Contains(err.Error(), "invalid value for --ref-kind") {
+		t.Fatalf("expected invalid --ref-kind error; got: %v", err)
+	}
+}
+
+func TestImplementorsExplainJSONOutput(t *testing.T) {
+	_, rs, dbPath := indexSamplemodWithPath(t)
+	m := captureJSON(t, func() {
+		if err := execImplementors(rs, dbPath, "example.com/samplemod/iface.Box[int]", "", 100, true, true); err != nil {
+			t.Fatalf("execImplementors explain: %v", err)
+		}
+	})
+	explain, ok := m["explain"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected explain payload; got %v", m["explain"])
+	}
+	if explain["mode"] != "iface" {
+		t.Fatalf("expected iface mode in explain payload; got %v", explain)
+	}
+	if explain["normalized_query"] != "example.com/samplemod/iface.Box" {
+		t.Fatalf("expected normalized query without instantiation args; got %v", explain["normalized_query"])
+	}
+}
+
 func TestReferencesTextOutput(t *testing.T) {
 	_, rs, dbPath := indexSamplemodWithPath(t)
 	if err := execReferences(rs, dbPath, "example.com/samplemod/alpha.Store", "", "", "", 200, false, false); err != nil {
@@ -2241,7 +2320,7 @@ func TestReferencesTextOutput(t *testing.T) {
 func TestCallersIsTestFilter(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, true, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 1, true, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers isTest: %v", err)
 		}
 	})
@@ -2260,7 +2339,7 @@ func TestCallersBFSDepthClamp(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	// Depth 0 should be clamped to 1, depth 99 to 10.
 	m := captureJSON(t, func() {
-		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 0, false, false, true, dbPath); err != nil {
+		if err := execCallers(rs, db, "example.com/samplemod/alpha.Top", 200, false, "", false, 0, false, false, true, false, dbPath); err != nil {
 			t.Fatalf("execCallers: %v", err)
 		}
 	})
@@ -2272,7 +2351,7 @@ func TestCallersBFSDepthClamp(t *testing.T) {
 func TestBlastRadiusFuzzy(t *testing.T) {
 	db, rs, dbPath := indexSamplemodWithPath(t)
 	m := captureJSON(t, func() {
-		if err := execBlastRadius(rs, db, "Top", 2, true, "", false, 200, true, dbPath); err != nil {
+		if err := execBlastRadius(rs, db, "Top", 2, true, "", false, 200, true, false, dbPath); err != nil {
 			t.Fatalf("execBlastRadius fuzzy: %v", err)
 		}
 	})

@@ -52,6 +52,10 @@ func newDeadCmd() *cobra.Command {
 }
 
 func execDead(rs store.ReadStore, db *sql.DB, kind, pkg string, limit int, includeExported, asJSON bool, dbPath string) error {
+	if err := validateEnumFlag("--kind", kind, deadKinds); err != nil {
+		return err
+	}
+
 	if autoReindex {
 		checkAndAutoReindex(db, false, false)
 	}

@@ -18,6 +18,7 @@ func newImplementorsCmd() *cobra.Command {
 	var iface string
 	var typ string
 	var limit int
+	var explain bool
 
 	cmd := &cobra.Command{
 		Use:           "implementors",
@@ -32,7 +33,7 @@ func newImplementorsCmd() *cobra.Command {
 				return err
 			}
 			defer st.Close()
-			return execImplementors(st, dbPath, iface, typ, limit, asJSON)
+			return execImplementors(st, dbPath, iface, typ, limit, asJSON, explain)
 		},
 	}
 
@@ -41,15 +42,40 @@ func newImplementorsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&iface, "iface", "", "partial interface fqname: find all types that implement it")
 	cmd.Flags().StringVar(&typ, "type", "", "partial type fqname: find all interfaces it implements")
 	cmd.Flags().IntVar(&limit, "limit", 200, "max results")
+	cmd.Flags().BoolVar(&explain, "explain", false, "show normalized query mode and filters")
 
 	return cmd
 }
 
-func execImplementors(rs store.ReadStore, dbPath, iface, typ string, limit int, asJSON bool) error {
+func execImplementors(rs store.ReadStore, dbPath, iface, typ string, limit int, asJSON bool, explain bool) error {
 	iface = strings.TrimSpace(iface)
 	typ = strings.TrimSpace(typ)
 	if (iface == "") == (typ == "") {
 		return errors.New("exactly one of --iface or --type is required")
+	}
+	mode := "iface"
+	input := iface
+	if iface == "" {
+		mode = "type"
+		input = typ
+	}
+
+	var explainData *explainPayload
+	if explain {
+		explainData = &explainPayload{
+			Command:         "implementors",
+			Input:           input,
+			Mode:            mode,
+			NormalizedQuery: stripTypeInstantiationArgs(input),
+			Filters: map[string]any{
+				"limit": limit,
+			},
+			Notes: []string{
+				"mode=iface returns implementing types",
+				"mode=type returns satisfied interfaces",
+				"store matches both exact query and normalized generic base",
+			},
+		}
 	}
 
 	ctx := context.Background()
@@ -75,9 +101,15 @@ func execImplementors(rs store.ReadStore, dbPath, iface, typ string, limit int, 
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetEscapeHTML(false)
-		return enc.Encode(map[string]any{"implementors": results, "count": len(results), "env": collectEnv(dbPath)})
+		payload := map[string]any{"implementors": results, "count": len(results), "env": collectEnv(dbPath)}
+		addExplain(payload, explainData)
+		return enc.Encode(payload)
 	}
 
+	if explainData != nil {
+		fmt.Print(formatExplainText(explainData))
+		fmt.Println()
+	}
 	for _, r := range storeRows {
 		ptrMarker := ""
 		if r.IsPointer {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sort"
 	"strings"
@@ -40,6 +41,14 @@ func writeJSONError(root *cobra.Command, err error) {
 		if flag, ok := extractFlagName(msg); ok {
 			payload["flag"] = flag
 		}
+	}
+
+	var invalidValueErr *invalidFlagValueError
+	if errors.As(err, &invalidValueErr) {
+		payload["error_code"] = "invalid_flag_value"
+		payload["flag"] = invalidValueErr.Flag
+		payload["value"] = invalidValueErr.Value
+		payload["valid_values"] = invalidValueErr.Valid
 	}
 
 	enc := json.NewEncoder(os.Stdout)

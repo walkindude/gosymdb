@@ -24,6 +24,7 @@ func newCallersCmd() *cobra.Command {
 	var depth int
 	var isTest bool
 	var countOnly bool
+	var explain bool
 
 	cmd := &cobra.Command{
 		Use:           "callers",
@@ -43,7 +44,7 @@ func newCallersCmd() *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			return execCallers(rs, db, symbol, limit, fuzzy, pkg, includeUnresolved, depth, isTest, countOnly, asJSON, dbPath)
+			return execCallers(rs, db, symbol, limit, fuzzy, pkg, includeUnresolved, depth, isTest, countOnly, asJSON, explain, dbPath)
 		},
 	}
 
@@ -57,6 +58,7 @@ func newCallersCmd() *cobra.Command {
 	cmd.Flags().IntVar(&depth, "depth", 1, "transitive caller depth (1 = direct callers only, max 10)")
 	cmd.Flags().BoolVar(&isTest, "is-test", false, "only include callers from test files (*_test.go)")
 	cmd.Flags().BoolVar(&countOnly, "count", false, "print only the callers count as an integer (no JSON envelope)")
+	cmd.Flags().BoolVar(&explain, "explain", false, "show normalized inputs and active filters")
 
 	return cmd
 }
@@ -133,7 +135,7 @@ func buildCallersBFS(rs store.ReadStore, symbol string, fuzzy bool, pkg string, 
 }
 
 // formatCallersJSON builds and writes the JSON envelope for callers output.
-func formatCallersJSON(db *sql.DB, symbol, resolveNote, dbPath string, allCallers []callerRow, unresolved []callersUnresolvedRow, depth int) error {
+func formatCallersJSON(db *sql.DB, symbol, resolveNote, dbPath string, allCallers []callerRow, unresolved []callersUnresolvedRow, depth int, explain *explainPayload) error {
 	payload := map[string]any{
 		"callers":          allCallers,
 		"callers_count":    len(allCallers),
@@ -145,6 +147,7 @@ func formatCallersJSON(db *sql.DB, symbol, resolveNote, dbPath string, allCaller
 	if resolveNote != "" {
 		payload["resolved"] = resolveNote
 	}
+	addExplain(payload, explain)
 	if len(allCallers) == 0 && len(unresolved) == 0 {
 		if h := interfaceDispatchHint(db, symbol); h != "" {
 			payload["hint"] = h
@@ -157,9 +160,12 @@ func formatCallersJSON(db *sql.DB, symbol, resolveNote, dbPath string, allCaller
 	return enc.Encode(payload)
 }
 
-func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy bool, pkg string, includeUnresolved bool, depth int, isTest bool, countOnly bool, asJSON bool, dbPath string) error {
+func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy bool, pkg string, includeUnresolved bool, depth int, isTest bool, countOnly bool, asJSON bool, explain bool, dbPath string) error {
 	if strings.TrimSpace(symbol) == "" {
 		return errors.New("--symbol is required")
+	}
+	if countOnly && explain {
+		return errors.New("--count and --explain cannot be used together")
 	}
 	if depth < 1 {
 		depth = 1
@@ -172,8 +178,37 @@ func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 		checkAndAutoReindex(db, false, false)
 	}
 
+	rawSymbol := symbol
 	var resolveNote string
 	symbol, resolveNote = resolveSymbolInput(db, symbol, pkg)
+
+	var explainData *explainPayload
+	if explain {
+		explainData = &explainPayload{
+			Command:        "callers",
+			Input:          rawSymbol,
+			ResolvedSymbol: symbol,
+			Resolution:     resolveNote,
+			Filters: map[string]any{
+				"pkg":                pkg,
+				"include_unresolved": includeUnresolved,
+				"is_test":            isTest,
+				"fuzzy":              fuzzy,
+			},
+			Traversal: map[string]any{
+				"depth": depth,
+				"limit": limit,
+				"search_mode": map[string]any{
+					"exact_first":                        true,
+					"fuzzy_fallback_when_exact_has_none": fuzzy,
+				},
+			},
+			Notes: []string{
+				"pkg filter applies to caller package paths",
+				"depth controls BFS hops over callers",
+			},
+		}
+	}
 
 	allCallers, err := buildCallersBFS(rs, symbol, fuzzy, pkg, depth, limit, isTest)
 	if err != nil {
@@ -203,7 +238,12 @@ func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 	}
 
 	if asJSON {
-		return formatCallersJSON(db, symbol, resolveNote, dbPath, allCallers, unresolved, depth)
+		return formatCallersJSON(db, symbol, resolveNote, dbPath, allCallers, unresolved, depth, explainData)
+	}
+
+	if explainData != nil {
+		fmt.Print(formatExplainText(explainData))
+		fmt.Println()
 	}
 
 	if resolveNote != "" {

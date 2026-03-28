@@ -22,6 +22,7 @@ func newBlastRadiusCmd() *cobra.Command {
 	var pkg string
 	var excludeTests bool
 	var limit int
+	var explain bool
 
 	cmd := &cobra.Command{
 		Use:           "blast-radius",
@@ -41,7 +42,7 @@ func newBlastRadiusCmd() *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			return execBlastRadius(rs, db, symbol, depth, fuzzy, pkg, excludeTests, limit, asJSON, dbPath)
+			return execBlastRadius(rs, db, symbol, depth, fuzzy, pkg, excludeTests, limit, asJSON, explain, dbPath)
 		},
 	}
 
@@ -53,6 +54,7 @@ func newBlastRadiusCmd() *cobra.Command {
 	cmd.Flags().StringVar(&pkg, "pkg", "", "restrict results to callers in this package path prefix")
 	cmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "skip test callers from results and traversal")
 	cmd.Flags().IntVar(&limit, "limit", 500, "maximum rows returned")
+	cmd.Flags().BoolVar(&explain, "explain", false, "show normalized inputs and traversal filters")
 
 	return cmd
 }
@@ -122,7 +124,7 @@ func formatBlastRadiusText(symbol, resolveNote string, callers []blastCallerEntr
 		len(callers), s.testCount, len(callers)-s.testCount, s.maxDepth, suffix)
 }
 
-func execBlastRadius(rs store.ReadStore, db *sql.DB, symbol string, depth int, fuzzy bool, pkg string, excludeTests bool, limit int, asJSON bool, dbPath string) error {
+func execBlastRadius(rs store.ReadStore, db *sql.DB, symbol string, depth int, fuzzy bool, pkg string, excludeTests bool, limit int, asJSON bool, explain bool, dbPath string) error {
 	if strings.TrimSpace(symbol) == "" {
 		return errors.New("--symbol is required")
 	}
@@ -137,8 +139,38 @@ func execBlastRadius(rs store.ReadStore, db *sql.DB, symbol string, depth int, f
 		checkAndAutoReindex(db, false, false)
 	}
 
+	rawSymbol := symbol
 	var resolveNote string
 	symbol, resolveNote = resolveSymbolInput(db, symbol, pkg)
+
+	var explainData *explainPayload
+	if explain {
+		seedMatch := fmt.Sprintf("calls.to_fqname = %q", symbol)
+		if fuzzy {
+			seedMatch = fmt.Sprintf("(calls.to_fqname = %q OR calls.to_fqname LIKE %q)", symbol, "%"+symbol+"%")
+		}
+		explainData = &explainPayload{
+			Command:        "blast-radius",
+			Input:          rawSymbol,
+			ResolvedSymbol: symbol,
+			Resolution:     resolveNote,
+			Filters: map[string]any{
+				"pkg":           pkg,
+				"exclude_tests": excludeTests,
+				"fuzzy":         fuzzy,
+			},
+			Traversal: map[string]any{
+				"seed_match":    seedMatch,
+				"max_depth":     depth,
+				"limit":         limit,
+				"recursive_cte": true,
+			},
+			Notes: []string{
+				"pkg filter applies during recursive traversal",
+				"exclude-tests removes test callers from both results and traversal",
+			},
+		}
+	}
 
 	ctx := context.Background()
 	rows, err := rs.BlastRadius(ctx, store.BlastRadiusOpts{
@@ -185,6 +217,7 @@ func execBlastRadius(rs store.ReadStore, db *sql.DB, symbol string, depth int, f
 		if resolveNote != "" {
 			payload["resolved"] = resolveNote
 		}
+		addExplain(payload, explainData)
 		if len(callers) == 0 {
 			if h := symbolHint(db, symbol); h != "" {
 				payload["hint"] = h
@@ -195,6 +228,10 @@ func execBlastRadius(rs store.ReadStore, db *sql.DB, symbol string, depth int, f
 		return enc.Encode(payload)
 	}
 
+	if explainData != nil {
+		fmt.Print(formatExplainText(explainData))
+		fmt.Println()
+	}
 	formatBlastRadiusText(symbol, resolveNote, callers, depth, s)
 	return nil
 }

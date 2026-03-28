@@ -220,6 +220,28 @@ func TestWriteJSONErrorMissingFlag(t *testing.T) {
 	}
 }
 
+func TestWriteJSONErrorInvalidFlagValue(t *testing.T) {
+	root := &cobra.Command{Use: "gosymdb"}
+	m := captureWriteJSONError(t, root, &invalidFlagValueError{
+		Flag:  "--kind",
+		Value: "metho",
+		Valid: []string{"func", "method"},
+	})
+	if m["error_code"] != "invalid_flag_value" {
+		t.Errorf("expected error_code=invalid_flag_value; got %v", m)
+	}
+	if m["flag"] != "--kind" {
+		t.Errorf("expected flag=--kind; got %v", m)
+	}
+	if m["value"] != "metho" {
+		t.Errorf("expected value=metho; got %v", m)
+	}
+	valids, _ := m["valid_values"].([]any)
+	if len(valids) != 2 {
+		t.Errorf("expected valid_values in JSON error; got %v", m)
+	}
+}
+
 func TestWriteJSONErrorGenericIncludesMessage(t *testing.T) {
 	root := &cobra.Command{Use: "gosymdb"}
 	m := captureWriteJSONError(t, root, errors.New("something went wrong"))
