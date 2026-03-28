@@ -156,7 +156,7 @@ func init() {
 // with no subcommand — no DB needed).
 func isDBExemptCmd(cmd *cobra.Command) bool {
 	name := cmd.Name()
-	return name == "index" || name == "version" || name == "agent-context" ||
+	return name == "index" || name == "version" || name == "agent-context" || name == "help" ||
 		cmd.Parent() == nil
 }
 
