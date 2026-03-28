@@ -172,6 +172,7 @@ func TestBench(t *testing.T) {
 	t.Run("20_iface_embedding", func(t *testing.T) { t.Parallel(); bench20(t, env) })
 	t.Run("21_ref_edge_cases", func(t *testing.T) { t.Parallel(); bench21(t, env) })
 	t.Run("22_alias_generic_consistency", func(t *testing.T) { t.Parallel(); bench22(t, env) })
+	t.Run("23_blast_pkg_filter", func(t *testing.T) { t.Parallel(); bench23(t, env) })
 
 	// Append bench-history record after all subtests complete.
 	// t.Cleanup runs after subtests, so we use it to capture the final state.
@@ -749,6 +750,36 @@ func bench22(t *testing.T, e *benchEnv) {
 	}
 	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Box[int].Unbox"); jcontains(sym, "\"error\":") || jcontains(sym, "\"symbol\":null") {
 		t.Error("iface.Box[int].Unbox appears in call edges but def cannot resolve it")
+	}
+}
+
+func bench23(t *testing.T, e *benchEnv) {
+	// 23: BLAST-RADIUS --pkg should restrict caller packages the same way callers does.
+	symbol := "testbench/blast_pkg_filter/core.Target"
+	pkg := "testbench/blast_pkg_filter/use"
+
+	callers := benchCapture(t, func() {
+		if err := execCallers(e.rs, e.db, symbol, 200, false, pkg, false, 5, false, false, true, e.dbPath); err != nil {
+			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
+		}
+	})
+	if !jcontains(callers, "testbench/blast_pkg_filter/use.Use") {
+		t.Fatal("callers --pkg should include use.Use as the direct caller")
+	}
+	if jcontains(callers, "testbench/blast_pkg_filter/core.Local") {
+		t.Fatal("callers --pkg unexpectedly included core.Local; control query is wrong")
+	}
+
+	blast := benchCapture(t, func() {
+		if err := execBlastRadius(e.rs, e.db, symbol, 5, false, pkg, false, 200, true, e.dbPath); err != nil {
+			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
+		}
+	})
+	if !jcontains(blast, "testbench/blast_pkg_filter/use.Use") {
+		t.Error("blast-radius --pkg should include use.Use")
+	}
+	if jcontains(blast, "testbench/blast_pkg_filter/core.Local") {
+		t.Error("blast-radius --pkg leaked caller(s) outside the requested package prefix")
 	}
 }
 
