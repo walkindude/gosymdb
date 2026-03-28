@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f gosymdb.sqlite ]; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"REMINDER: gosymdb is indexed for this codebase. Use gosymdb commands instead of grep for symbol navigation. Run: gosymdb find --q <query> --json, or use /go:sym, /go:trace, /go:impact skills. Grep is only appropriate for non-symbol searches (string literals, TODOs, config values).\"}}'; fi",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}
