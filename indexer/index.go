@@ -86,6 +86,15 @@ func (r *indexRun) recordSymbol(pkg *packages.Package, filePath string, obj type
 	}
 }
 
+func (r *indexRun) recordSyntheticSymbol(pkg *packages.Package, filePath, name, kind, recv, sig, fqname string, exported bool, pos token.Position) {
+	if _, err := r.insertSymbol.Exec(
+		r.moduleRoot, pkg.PkgPath, pkg.Name, filePath,
+		name, kind, recv, sig, fqname, boolToInt(exported), pos.Line, pos.Column,
+	); err == nil {
+		r.symbolCount++
+	}
+}
+
 // indexGenDeclSpecs processes type and value specs within a GenDecl.
 func (r *indexRun) indexGenDeclSpecs(pkg *packages.Package, filePath string, decl *ast.GenDecl) {
 	for _, spec := range decl.Specs {
@@ -100,6 +109,9 @@ func (r *indexRun) indexGenDeclSpecs(pkg *packages.Package, filePath string, dec
 				kind = "interface"
 			}
 			r.recordSymbol(pkg, filePath, obj, kind, "")
+			if kind == "interface" {
+				r.recordInterfaceMethods(pkg, filePath, s)
+			}
 		case *ast.ValueSpec:
 			kind := "var"
 			if decl.Tok == token.CONST {
@@ -114,6 +126,63 @@ func (r *indexRun) indexGenDeclSpecs(pkg *packages.Package, filePath string, dec
 			}
 		}
 	}
+}
+
+func (r *indexRun) recordInterfaceMethods(pkg *packages.Package, filePath string, spec *ast.TypeSpec) {
+	obj := pkg.TypesInfo.Defs[spec.Name]
+	if obj == nil {
+		return
+	}
+	iface, ok := obj.Type().Underlying().(*types.Interface)
+	if !ok {
+		return
+	}
+	parent := fmt.Sprintf("%s.%s", pkg.PkgPath, spec.Name.Name)
+	for _, field := range interfaceMethodFields(spec) {
+		for _, name := range field.Names {
+			m := ifaceMethodByName(iface, name.Name)
+			if m == nil {
+				continue
+			}
+			pos := pkg.Fset.PositionFor(name.Pos(), false)
+			r.recordSyntheticSymbol(
+				pkg,
+				filePath,
+				name.Name,
+				"method",
+				parent,
+				m.Type().String(),
+				parent+"."+name.Name,
+				m.Exported(),
+				pos,
+			)
+		}
+	}
+}
+
+func interfaceMethodFields(spec *ast.TypeSpec) []*ast.Field {
+	it, ok := spec.Type.(*ast.InterfaceType)
+	if !ok || it.Methods == nil {
+		return nil
+	}
+	fields := make([]*ast.Field, 0, len(it.Methods.List))
+	for _, field := range it.Methods.List {
+		if len(field.Names) == 0 {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	return fields
+}
+
+func ifaceMethodByName(iface *types.Interface, name string) *types.Func {
+	for i := 0; i < iface.NumMethods(); i++ {
+		m := iface.Method(i)
+		if m != nil && m.Name() == name {
+			return m
+		}
+	}
+	return nil
 }
 
 // indexPackageSymbols extracts symbols (funcs, methods, types, vars, consts)
@@ -807,12 +876,14 @@ func deduplicateTestPackages(pkgs []*packages.Package) []*packages.Package {
 type ifaceEntry struct {
 	fqname string
 	pkg    string
+	typ    *types.Named
 	iface  *types.Interface
 }
 
 type concreteEntry struct {
 	fqname string
 	pkg    string
+	typn   *types.Named
 	typ    types.Type
 	ptr    *types.Pointer
 }
@@ -828,14 +899,12 @@ func collectIfacesAndConcretes(pkgs []*packages.Package) ([]ifaceEntry, []concre
 		scope := pkg.Types.Scope()
 		for _, name := range scope.Names() {
 			tn, ok := scope.Lookup(name).(*types.TypeName)
-			if !ok || tn.IsAlias() {
-				continue
-			}
-			named, ok := tn.Type().(*types.Named)
 			if !ok {
 				continue
 			}
-			if named.TypeParams() != nil && named.TypeParams().Len() > 0 {
+			base := types.Unalias(tn.Type())
+			named, ok := base.(*types.Named)
+			if !ok {
 				continue
 			}
 			fqname := fmt.Sprintf("%s.%s", pkg.PkgPath, name)
@@ -846,12 +915,14 @@ func collectIfacesAndConcretes(pkgs []*packages.Package) ([]ifaceEntry, []concre
 				ifaces = append(ifaces, ifaceEntry{
 					fqname: fqname,
 					pkg:    pkg.PkgPath,
+					typ:    named,
 					iface:  iface.Complete(),
 				})
 			} else {
 				concretes = append(concretes, concreteEntry{
 					fqname: fqname,
 					pkg:    pkg.PkgPath,
+					typn:   named,
 					typ:    tn.Type(),
 					ptr:    types.NewPointer(tn.Type()),
 				})
@@ -910,8 +981,12 @@ func IndexImplements(insertImpl, insertImplMethod, insertIfaceMethod *sql.Stmt, 
 	count := 0
 	for _, iface := range ifaces {
 		for _, concrete := range concretes {
-			valueOk := safeImplements(concrete.typ, iface.iface)
-			ptrOk := !valueOk && safeImplements(concrete.ptr, iface.iface)
+			valueType, ifaceType, ok := comparableImplementsTypes(concrete, iface)
+			if !ok {
+				continue
+			}
+			valueOk := safeImplements(valueType, ifaceType)
+			ptrOk := !valueOk && safeImplements(types.NewPointer(valueType), ifaceType)
 			if !valueOk && !ptrOk {
 				continue
 			}
@@ -924,16 +999,42 @@ func IndexImplements(insertImpl, insertImplMethod, insertIfaceMethod *sql.Stmt, 
 			}
 			count++
 
-			implTyp := concrete.typ
+			implTyp := valueType
 			if ptrOk {
-				implTyp = concrete.ptr
+				implTyp = types.NewPointer(valueType)
 			}
-			if err := recordImplMethods(insertImplMethod, moduleRoot, implTyp, iface.iface); err != nil {
+			if err := recordImplMethods(insertImplMethod, moduleRoot, implTyp, ifaceType); err != nil {
 				return count, err
 			}
 		}
 	}
 	return count, nil
+}
+
+func comparableImplementsTypes(concrete concreteEntry, iface ifaceEntry) (types.Type, *types.Interface, bool) {
+	if iface.typ.TypeParams().Len() == 0 && concrete.typn.TypeParams().Len() == 0 {
+		return concrete.typ, iface.iface, true
+	}
+	if iface.typ.TypeParams().Len() != concrete.typn.TypeParams().Len() {
+		return nil, nil, false
+	}
+	targs := make([]types.Type, 0, iface.typ.TypeParams().Len())
+	for i := 0; i < iface.typ.TypeParams().Len(); i++ {
+		targs = append(targs, iface.typ.TypeParams().At(i))
+	}
+	instIface, err := types.Instantiate(nil, iface.typ, targs, false)
+	if err != nil {
+		return nil, nil, false
+	}
+	instConcrete, err := types.Instantiate(nil, concrete.typn, targs, false)
+	if err != nil {
+		return nil, nil, false
+	}
+	out, ok := instIface.Underlying().(*types.Interface)
+	if !ok {
+		return nil, nil, false
+	}
+	return instConcrete, out.Complete(), true
 }
 
 // safeImplements wraps types.Implements in a recover to guard against panics

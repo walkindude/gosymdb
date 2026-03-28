@@ -739,7 +739,7 @@ func bench22(t *testing.T, e *benchEnv) {
 	if !jcontains(callees, "testbench/alias_generic_consistency/iface.Reader.Read") {
 		t.Fatal("UseReader should call iface.Reader.Read according to current edge model")
 	}
-	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Reader.Read"); jcontains(sym, "\"symbol\":null") {
+	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Reader.Read"); jcontains(sym, "\"error\":") || jcontains(sym, "\"symbol\":null") {
 		t.Error("iface.Reader.Read appears in call edges but def cannot resolve it")
 	}
 
@@ -747,7 +747,7 @@ func bench22(t *testing.T, e *benchEnv) {
 	if !jcontains(callees, "testbench/alias_generic_consistency/iface.Box[int].Unbox") {
 		t.Fatal("UseBoxInt should call iface.Box[int].Unbox according to current edge model")
 	}
-	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Box[int].Unbox"); jcontains(sym, "\"symbol\":null") {
+	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Box[int].Unbox"); jcontains(sym, "\"error\":") || jcontains(sym, "\"symbol\":null") {
 		t.Error("iface.Box[int].Unbox appears in call edges but def cannot resolve it")
 	}
 }
