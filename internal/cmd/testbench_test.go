@@ -171,6 +171,7 @@ func TestBench(t *testing.T) {
 	t.Run("19_named_func_types", func(t *testing.T) { t.Parallel(); bench19(t, env) })
 	t.Run("20_iface_embedding", func(t *testing.T) { t.Parallel(); bench20(t, env) })
 	t.Run("21_ref_edge_cases", func(t *testing.T) { t.Parallel(); bench21(t, env) })
+	t.Run("22_alias_generic_consistency", func(t *testing.T) { t.Parallel(); bench22(t, env) })
 
 	// Append bench-history record after all subtests complete.
 	// t.Cleanup runs after subtests, so we use it to capture the final state.
@@ -269,6 +270,15 @@ func bImpls(t *testing.T, e *benchEnv, iface string) map[string]any {
 	t.Helper()
 	return benchCapture(t, func() {
 		if err := execImplementors(e.rs, e.dbPath, iface, "", 100, true); err != nil {
+			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
+		}
+	})
+}
+
+func bDef(t *testing.T, e *benchEnv, symbol string) map[string]any {
+	t.Helper()
+	return benchCapture(t, func() {
+		if err := execDef(e.rs, e.dbPath, symbol, "", true); err != nil {
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		}
 	})
@@ -710,6 +720,35 @@ func bench21(t *testing.T, e *benchEnv) {
 	// sendTarget is sent on a channel via ch <- sendTarget
 	if callersCount(t, e, "testbench/ref_edge_cases.sendTarget") == 0 {
 		t.Error("sendTarget should have callers (sent on channel — SendStmt)")
+	}
+}
+
+func bench22(t *testing.T, e *benchEnv) {
+	// 22: ALIAS + GENERIC IMPLEMENTORS + CALL-TARGET CONSISTENCY
+	impls := bImpls(t, e, "testbench/alias_generic_consistency/alias.ReaderAlias")
+	if !jcontains(impls, "testbench/alias_generic_consistency/alias.File") {
+		t.Error("ReaderAlias should return File as an implementor (type alias of iface.Reader)")
+	}
+
+	impls = bImpls(t, e, "testbench/alias_generic_consistency/iface.Box[int]")
+	if !jcontains(impls, "testbench/alias_generic_consistency/alias.GenericBox") {
+		t.Error("Box[int] should return GenericBox as an implementor")
+	}
+
+	callees := bCallees(t, e, "testbench/alias_generic_consistency/use.UseReader")
+	if !jcontains(callees, "testbench/alias_generic_consistency/iface.Reader.Read") {
+		t.Fatal("UseReader should call iface.Reader.Read according to current edge model")
+	}
+	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Reader.Read"); jcontains(sym, "\"error\":") || jcontains(sym, "\"symbol\":null") {
+		t.Error("iface.Reader.Read appears in call edges but def cannot resolve it")
+	}
+
+	callees = bCallees(t, e, "testbench/alias_generic_consistency/use.UseBoxInt")
+	if !jcontains(callees, "testbench/alias_generic_consistency/iface.Box[int].Unbox") {
+		t.Fatal("UseBoxInt should call iface.Box[int].Unbox according to current edge model")
+	}
+	if sym := bDef(t, e, "testbench/alias_generic_consistency/iface.Box[int].Unbox"); jcontains(sym, "\"error\":") || jcontains(sym, "\"symbol\":null") {
+		t.Error("iface.Box[int].Unbox appears in call edges but def cannot resolve it")
 	}
 }
 

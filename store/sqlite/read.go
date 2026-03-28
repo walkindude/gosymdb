@@ -32,6 +32,26 @@ func shortName(fqname string) string {
 	return rest
 }
 
+func stripInstantiationArgs(name string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range name {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
 // ---- FindSymbols / CountSymbols ----
 
 func (s *SQLiteStore) FindSymbols(ctx context.Context, opts store.FindOpts) (store.FindResult, error) {
@@ -150,6 +170,19 @@ func (s *SQLiteStore) DefSymbol(ctx context.Context, name, pkg string) ([]store.
 	if err != nil {
 		return nil, fmt.Errorf("DefSymbol fqname lookup: %w", err)
 	}
+	if len(results) == 0 {
+		baseName := stripInstantiationArgs(name)
+		if baseName != name {
+			qargs = []any{baseName}
+			if pkg != "" {
+				qargs = append(qargs, pkg+"%")
+			}
+			results, err = scanRows(q, qargs...)
+			if err != nil {
+				return nil, fmt.Errorf("DefSymbol normalized fqname lookup: %w", err)
+			}
+		}
+	}
 
 	// 2. Exact name match (may be ambiguous).
 	if len(results) == 0 {
@@ -163,6 +196,20 @@ func (s *SQLiteStore) DefSymbol(ctx context.Context, name, pkg string) ([]store.
 		results, err = scanRows(q, qargs...)
 		if err != nil {
 			return nil, fmt.Errorf("DefSymbol name lookup: %w", err)
+		}
+		if len(results) == 0 {
+			baseName := stripInstantiationArgs(name)
+			if baseName != name {
+				qargs = []any{baseName}
+				if pkg != "" {
+					qargs = append(qargs, pkg+"%")
+				}
+				qargs = append(qargs, 20)
+				results, err = scanRows(q, qargs...)
+				if err != nil {
+					return nil, fmt.Errorf("DefSymbol normalized name lookup: %w", err)
+				}
+			}
 		}
 	}
 
@@ -256,21 +303,23 @@ func scanImplementorRows(s *SQLiteStore, ctx context.Context, opts store.Impleme
 	var q string
 	var args []any
 	if opts.Iface != "" {
+		ifaceBase := stripInstantiationArgs(opts.Iface)
 		q = `
 SELECT iface_fqname, impl_fqname, is_pointer
 FROM implements
-WHERE iface_fqname = ? OR iface_fqname LIKE ?
+WHERE iface_fqname = ? OR iface_fqname LIKE ? OR iface_fqname = ? OR iface_fqname LIKE ?
 ORDER BY impl_fqname
 LIMIT ?`
-		args = []any{opts.Iface, "%" + opts.Iface + "%", limit}
+		args = []any{opts.Iface, "%" + opts.Iface + "%", ifaceBase, "%" + ifaceBase + "%", limit}
 	} else {
+		typeBase := stripInstantiationArgs(opts.Type)
 		q = `
 SELECT iface_fqname, impl_fqname, is_pointer
 FROM implements
-WHERE impl_fqname = ? OR impl_fqname LIKE ?
+WHERE impl_fqname = ? OR impl_fqname LIKE ? OR impl_fqname = ? OR impl_fqname LIKE ?
 ORDER BY iface_fqname
 LIMIT ?`
-		args = []any{opts.Type, "%" + opts.Type + "%", limit}
+		args = []any{opts.Type, "%" + opts.Type + "%", typeBase, "%" + typeBase + "%", limit}
 	}
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
