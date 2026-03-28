@@ -614,35 +614,37 @@ func (s *SQLiteStore) BlastRadius(ctx context.Context, opts store.BlastRadiusOpt
 
 	pkgFilter := ""
 	if opts.Pkg != "" {
-		pkgFilter = ` AND COALESCE(s.package_path, '') LIKE ?`
-	}
-
-	queryArgs = append(queryArgs, opts.Depth, opts.Limit)
-	if opts.Pkg != "" {
-		// pkg arg goes between depth and limit in the outer query.
-		n := len(queryArgs)
-		queryArgs = append(queryArgs[:n-1], opts.Pkg+"%", queryArgs[n-1])
+		pkgFilter = ` AND c.package_path LIKE ?`
 	}
 
 	query := `
 WITH RECURSIVE blast(caller, depth) AS (
   SELECT DISTINCT c.from_fqname, 1
   FROM calls c
-  WHERE ` + seedWhere + testFilter + `
+  WHERE ` + seedWhere + testFilter + pkgFilter + `
 
   UNION
 
   SELECT DISTINCT c.from_fqname, b.depth + 1
   FROM calls c
   INNER JOIN blast b ON c.to_fqname = b.caller
-  WHERE b.depth < ?` + testFilter + `
+  WHERE b.depth < ?` + testFilter + pkgFilter + `
 )
 SELECT b.caller, MIN(b.depth) AS depth, COALESCE(s.file_path, ''), COALESCE(s.line, 0), COALESCE(s.package_path, '')
 FROM blast b
 LEFT JOIN symbols s ON s.fqname = b.caller
-GROUP BY b.caller` + pkgFilter + `
+GROUP BY b.caller
 ORDER BY MIN(b.depth), b.caller
 LIMIT ?`
+
+	if opts.Pkg != "" {
+		queryArgs = append(queryArgs, opts.Pkg+"%")
+	}
+	queryArgs = append(queryArgs, opts.Depth)
+	if opts.Pkg != "" {
+		queryArgs = append(queryArgs, opts.Pkg+"%")
+	}
+	queryArgs = append(queryArgs, opts.Limit)
 
 	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
