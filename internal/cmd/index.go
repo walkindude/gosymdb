@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -30,7 +31,8 @@ func newIndexCmd() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dbPath, _ := cmd.Root().PersistentFlags().GetString("db")
-			return runIndex(dbPath, root, enableCGO, force, withTests)
+			asJSON, _ := cmd.Root().PersistentFlags().GetBool("json")
+			return runIndex(dbPath, root, enableCGO, force, withTests, asJSON)
 		},
 	}
 
@@ -44,7 +46,7 @@ func newIndexCmd() *cobra.Command {
 	return cmd
 }
 
-func runIndex(dbPath, root string, enableCGO, force, withTests bool) error {
+func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON bool) error {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -128,5 +130,17 @@ func runIndex(dbPath, root string, enableCGO, force, withTests bool) error {
 	}
 
 	log.Printf("done: %d modules, %d symbols, %d calls, %d unresolved, %d type_refs", len(modules), totalSymbols, totalCalls, totalUnresolved, totalTypeRefs)
+
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(map[string]any{
+			"indexed":    len(modules),
+			"symbols":    totalSymbols,
+			"calls":      totalCalls,
+			"unresolved": totalUnresolved,
+			"type_refs":  totalTypeRefs,
+		})
+	}
 	return nil
 }

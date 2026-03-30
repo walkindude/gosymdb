@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/walkindude/gosymdb/store"
 	"github.com/walkindude/gosymdb/store/sqlite"
@@ -79,6 +80,16 @@ func execFind(rs store.ReadStore, dbPath, query, pkg, kind, file string, limit i
 		return err
 	}
 
+	// Warn when --pkg looks like a short name (no dot and no slash), since the
+	// filter requires a full package path prefix such as github.com/owner/repo/pkg.
+	pkgWarning := ""
+	if pkg != "" && !strings.Contains(pkg, ".") && !strings.Contains(pkg, "/") {
+		pkgWarning = fmt.Sprintf("--pkg requires a full package path prefix (e.g. github.com/owner/repo/internal/%s); short names like %q will not match", pkg, pkg)
+		if !asJSON {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", pkgWarning)
+		}
+	}
+
 	type symRow struct {
 		FQName      string `json:"fqname"`
 		Name        string `json:"name"`
@@ -104,15 +115,19 @@ func execFind(rs store.ReadStore, dbPath, query, pkg, kind, file string, limit i
 				PackagePath: s.PackagePath,
 			})
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(map[string]any{
+		payload := map[string]any{
 			"symbols":       out,
 			"count":         len(out),
 			"total_matched": result.TotalMatched,
 			"truncated":     result.TotalMatched > limit,
 			"env":           collectEnv(dbPath),
-		})
+		}
+		if pkgWarning != "" {
+			payload["warning"] = pkgWarning
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(payload)
 	}
 
 	for _, s := range result.Symbols {
