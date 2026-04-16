@@ -1,7 +1,7 @@
 *.sqlite
 *.exe
-gosymdb
-gosymdb-*
+/gosymdb
+/gosymdb-*
 cmd.test.exe
 bench_history.jsonl
 dist/
