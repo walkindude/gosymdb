@@ -721,109 +721,11 @@ func TestDeadTruncationIndicator(t *testing.T) {
 	}
 }
 
-// — trace —————————————————————————————————————————————————————————————————————
-
-func TestTraceSymbolSection(t *testing.T) {
-	moduleRoot, _ := filepath.Abs(filepath.Join("..", "..", "testdata", "samplemod"))
-	tmpPath := filepath.Join(t.TempDir(), "trace.sqlite")
-	tdb, _ := sql.Open(sqlite.DriverName, tmpPath)
-	t.Cleanup(func() { tdb.Close() })
-	indexer.ResetSchema(tdb)
-	indexer.IndexModule(tdb, moduleRoot, false, false)
-
-	rs, err := sqlite.Open(tmpPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer rs.Close()
-	db2, _ := sql.Open(sqlite.DriverName, tmpPath)
-	t.Cleanup(func() { db2.Close() })
-
-	out := captureJSON(t, func() {
-		execTrace(rs, db2, "example.com/samplemod/alpha.Top", "", 20, 20, true, tmpPath)
-	})
-
-	// symbol section present and populated.
-	sym, ok := out["symbol"].(map[string]any)
-	if !ok || sym == nil {
-		t.Fatalf("trace JSON missing 'symbol' section; got %v", out)
-	}
-	if sym["fqname"] != "example.com/samplemod/alpha.Top" {
-		t.Errorf("symbol.fqname wrong: %v", sym["fqname"])
-	}
-	if sym["kind"] != "func" {
-		t.Errorf("symbol.kind wrong: %v", sym["kind"])
-	}
-
-	// callees section: Top calls AddObservation.
-	callees, _ := out["callees"].([]any)
-	if len(callees) == 0 {
-		t.Error("trace JSON callees should not be empty for alpha.Top")
-	}
-	hasAddObs := false
-	for _, c := range callees {
-		cm, _ := c.(map[string]any)
-		if cm["fqname"] == "example.com/samplemod/alpha.*Store.AddObservation" {
-			hasAddObs = true
-		}
-	}
-	if !hasAddObs {
-		t.Errorf("callees should include AddObservation; got %v", callees)
-	}
-
-	// callers section: Top is called by beta.Use.
-	callers, _ := out["callers"].([]any)
-	hasUse := false
-	for _, c := range callers {
-		cm, _ := c.(map[string]any)
-		if strings.Contains(cm["fqname"].(string), "beta.Use") {
-			hasUse = true
-		}
-	}
-	if !hasUse {
-		t.Errorf("callers should include beta.Use; got %v", callers)
-	}
-
-	// blast_radius section present.
-	br, ok := out["blast_radius"].(map[string]any)
-	if !ok || br == nil {
-		t.Fatalf("trace JSON missing 'blast_radius' section; got %v", out)
-	}
-	total, _ := br["total"].(float64)
-	if total == 0 {
-		t.Error("blast_radius.total should be > 0 for alpha.Top (called by beta.Use)")
-	}
-}
-
-func TestTraceUnknownSymbolHint(t *testing.T) {
-	moduleRoot, _ := filepath.Abs(filepath.Join("..", "..", "testdata", "samplemod"))
-	tmpPath := filepath.Join(t.TempDir(), "trace_hint.sqlite")
-	tdb, _ := sql.Open(sqlite.DriverName, tmpPath)
-	t.Cleanup(func() { tdb.Close() })
-	indexer.ResetSchema(tdb)
-	indexer.IndexModule(tdb, moduleRoot, false, false)
-
-	rs, err := sqlite.Open(tmpPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer rs.Close()
-	db2, _ := sql.Open(sqlite.DriverName, tmpPath)
-	t.Cleanup(func() { db2.Close() })
-
-	out := captureJSON(t, func() {
-		execTrace(rs, db2, "example.com/samplemod/alpha.NonExistentFunc", "", 20, 20, true, tmpPath)
-	})
-	if _, hasHint := out["hint"]; !hasHint {
-		t.Error("trace should include 'hint' when symbol not found")
-	}
-}
-
 // — agent-context ——————————————————————————————————————————————————————————————
 
-// TestAgentContextIncludesTraceAndDef verifies that agent-context lists both
-// the trace and def commands in its commands array.
-func TestAgentContextIncludesTraceAndDef(t *testing.T) {
+// TestAgentContextIncludesDef verifies that agent-context lists the def
+// command in its commands array (smoke-test for the ordered list).
+func TestAgentContextIncludesDef(t *testing.T) {
 	out := captureJSON(t, func() { execAgentContext("") })
 	cmds, ok := out["commands"].([]any)
 	if !ok {
@@ -835,9 +737,6 @@ func TestAgentContextIncludesTraceAndDef(t *testing.T) {
 		if name, _ := cm["command"].(string); name != "" {
 			seen[name] = true
 		}
-	}
-	if !seen["gosymdb trace"] {
-		t.Error("agent-context missing 'gosymdb trace' in commands")
 	}
 	if !seen["gosymdb def"] {
 		t.Error("agent-context missing 'gosymdb def' in commands")
@@ -2128,38 +2027,6 @@ func TestBlastRadiusTextOutput(t *testing.T) {
 func TestBlastRadiusEmptySymbol(t *testing.T) {
 	db, rs, _ := indexSamplemodWithPath(t)
 	err := execBlastRadius(rs, db, "", 3, false, "", false, 200, true, false, "")
-	if err == nil {
-		t.Fatal("expected error for empty symbol")
-	}
-}
-
-// — execTrace —————————————————————————————————————————————————————————————————
-
-func TestTraceJSONOutput(t *testing.T) {
-	db, rs, dbPath := indexSamplemodWithPath(t)
-	m := captureJSON(t, func() {
-		if err := execTrace(rs, db, "example.com/samplemod/alpha.Top", "", 10, 10, true, dbPath); err != nil {
-			t.Fatalf("execTrace: %v", err)
-		}
-	})
-	if _, ok := m["symbol"]; !ok {
-		t.Error("expected 'symbol' key")
-	}
-	if _, ok := m["env"]; !ok {
-		t.Error("expected 'env' key")
-	}
-}
-
-func TestTraceTextOutput(t *testing.T) {
-	db, rs, _ := indexSamplemodWithPath(t)
-	if err := execTrace(rs, db, "example.com/samplemod/alpha.Top", "", 10, 10, false, ""); err != nil {
-		t.Fatalf("execTrace text: %v", err)
-	}
-}
-
-func TestTraceRequiresSymbol(t *testing.T) {
-	db, rs, _ := indexSamplemodWithPath(t)
-	err := execTrace(rs, db, "", "", 10, 10, true, "")
 	if err == nil {
 		t.Fatal("expected error for empty symbol")
 	}

@@ -23,14 +23,9 @@ make testbench
 make lint
 ```
 
-## Test-first discipline
+## Tests
 
-All bug fixes and features must include a test *before* the implementation:
-
-1. Write a failing test (or add a testbench module under `testbench/`)
-2. Verify it fails for the right reason
-3. Implement the fix/feature
-4. Verify the test passes
+Bug fixes should land with a regression test. For indexer/analyzer changes, add a minimal module under `testbench/` that exercises the case — see existing modules for the pattern.
 
 ## Testbench
 

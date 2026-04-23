@@ -53,3 +53,40 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: "v2.11.4"
+
+  dev-build:
+    # Build dev-<sha> binaries on every push to master so contributors can
+    # grab the latest unreleased build as a workflow artifact.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [test, vuln, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build dev-<sha> binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          VERSION="dev-${SHA}"
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          BIN="gosymdb_${VERSION}_${GOOS}_${GOARCH}${EXT}"
+          go build -trimpath -ldflags "-s -w -X github.com/walkindude/gosymdb/internal/cmd.Version=${VERSION}" -o "$BIN" .
+          echo "BIN=$BIN" >> "$GITHUB_ENV"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosymdb-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.BIN }}
+          retention-days: 30

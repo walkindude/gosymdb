@@ -115,9 +115,6 @@ type ReadStore interface {
 	FindReferences(ctx context.Context, opts ReferencesOpts) (ReferencesResult, error)
 	CountReferences(ctx context.Context, opts ReferencesOpts) (int, error)
 
-	// Trace (composite: symbol + callers + callees + blast total)
-	TraceSymbol(ctx context.Context, symbol string, callerLimit, calleeLimit int) (*TraceResult, error)
-
 	// Staleness detection (indexer/stale.go)
 	IndexedCommit(ctx context.Context) (string, error)
 	PackageFiles(ctx context.Context, moduleRoot, packagePath string) ([]PackageFile, error)
@@ -379,16 +376,6 @@ type RefRow struct {
 	Col         int
 	Expr        string
 	PackagePath string
-}
-
-// TraceResult is returned by TraceSymbol.
-type TraceResult struct {
-	Symbol     *SymbolRow
-	Callers    []CallerRow
-	Callees    []CalleeRow
-	BlastTotal int
-	BlastDepth int
-	BlastTrunc bool
 }
 
 // PackageFile is a per-file hash entry used by staleness detection.

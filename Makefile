@@ -1,4 +1,4 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || printf "dev-%s" $$(git rev-parse --short HEAD 2>/dev/null || echo unknown))
 LDFLAGS := -ldflags "-X github.com/walkindude/gosymdb/internal/cmd.Version=$(VERSION)"
 
 .PHONY: build build-cgo test testbench lint clean

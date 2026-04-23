@@ -92,19 +92,31 @@ func collectEnv(dbPath string) envBlock {
 	return env
 }
 
+// collectGitEnv collects branch/worktree/dirty/staged/fetch-age info for the
+// agent's env block. Each query fires ~7 git subprocess calls, which is
+// noticeable overhead on fast queries (find, def, callers on a small repo).
+//
+// Opt-in via `GOSYMDB_ENV_GIT=1`. Default (unset): skip all git calls and
+// return an empty struct. env.git remains in the JSON shape — just with
+// zero values and git_available=false — so downstream consumers keep working.
 func collectGitEnv() gitEnv {
+	if os.Getenv("GOSYMDB_ENV_GIT") != "1" {
+		return gitEnv{}
+	}
+
 	g := gitEnv{}
 
-	// Probe whether we are inside a git repo at all.
-	if _, err := gitOut("rev-parse", "--git-dir"); err == nil {
-		g.GitAvailable = true
+	// Probe whether we are inside a git repo at all. Also captures the git-dir
+	// string for the worktree check below, avoiding a duplicate subprocess.
+	gitDir, err := gitOut("rev-parse", "--git-dir")
+	if err != nil {
+		return g
 	}
+	g.GitAvailable = true
+	g.IsWorktree = strings.Contains(gitDir, "worktrees")
 
 	if b, err := gitOut("rev-parse", "--abbrev-ref", "HEAD"); err == nil {
 		g.Branch = b
-	}
-	if d, err := gitOut("rev-parse", "--git-dir"); err == nil {
-		g.IsWorktree = strings.Contains(d, "worktrees")
 	}
 	if r, err := gitOut("rev-parse", "--show-toplevel"); err == nil {
 		g.WorktreeRoot = r

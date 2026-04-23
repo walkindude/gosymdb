@@ -4,16 +4,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/walkindude/gosymdb/store/sqlite"
 
 	"github.com/spf13/cobra"
 )
 
-// Version is set by ldflags at build time (Makefile / GoReleaser).
+// Version is set by ldflags at build time (Makefile / GoReleaser) and falls
+// back to runtime VCS info so `go install @main` binaries report a useful
+// dev-<sha> tag instead of a bare "dev".
 var Version = "dev"
 
 const schemaVersion = 6
+
+func init() {
+	// If a release tag or explicit ldflag already set Version, keep it.
+	if Version != "dev" {
+		return
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+			Version = "dev-" + s.Value[:7]
+			return
+		}
+	}
+}
 
 func newVersionCmd() *cobra.Command {
 	cmd := &cobra.Command{

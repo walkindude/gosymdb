@@ -146,8 +146,8 @@ func init() {
 	rootCmd.AddCommand(newReferencesCmd())
 	rootCmd.AddCommand(newLogToolUseCmd())
 	rootCmd.AddCommand(newDefCmd())
-	rootCmd.AddCommand(newTraceCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newCLIBridgeManifestCmd())
 }
 
 // isDBExemptCmd returns true for commands that do not require a database to be
@@ -157,6 +157,7 @@ func init() {
 func isDBExemptCmd(cmd *cobra.Command) bool {
 	name := cmd.Name()
 	return name == "index" || name == "version" || name == "agent-context" || name == "help" ||
+		name == "cli-bridge-manifest" ||
 		cmd.Parent() == nil
 }
 

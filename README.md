@@ -4,6 +4,22 @@ A Go symbol and call-graph database backed by SQLite. Index any Go module and qu
 
 ## Install
 
+**One command** (macOS/Linux):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/walkindude/gosymdb/master/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/walkindude/gosymdb/master/install.ps1 | iex
+```
+
+The installer downloads the binary, verifies its checksum, and — if Claude Code is installed — generates the cli-bridge spec so gosymdb registers as a first-class MCP tool (see below).
+
+Or with the Go toolchain:
+
 ```bash
 go install github.com/walkindude/gosymdb@latest
 ```
@@ -11,18 +27,27 @@ go install github.com/walkindude/gosymdb@latest
 ## Quick start
 
 ```bash
-# Index the current module
+# 1. Index a Go module
+cd ~/your-go-project
 gosymdb index --root .
 
-# Find a symbol
+# 2. Query it
 gosymdb find --q Store --json
-
-# Full profile: definition + callers + callees + blast radius
-gosymdb trace --symbol MyFunc --json
-
-# What breaks if I change this?
-gosymdb blast-radius --symbol 'github.com/walkindude/gosymdb/indexer.IndexModule' --depth 5 --json
+gosymdb callers --symbol 'github.com/you/repo/pkg.MyFunc' --json
+gosymdb blast-radius --symbol 'github.com/you/repo/pkg.MyFunc' --depth 5 --json
 ```
+
+## Use with Claude Code (MCP)
+
+gosymdb exposes a self-describing manifest (`gosymdb cli-bridge-manifest`) that the [cli-bridge plugin](https://github.com/walkindude/cli-bridge) turns into first-class MCP tools. Once set up, your agent can call `gosymdb_callers`, `gosymdb_blast-radius`, `gosymdb_implementors` etc. directly — no grep fallbacks, structured output, typed answers.
+
+**Three steps:**
+
+1. `go install github.com/walkindude/gosymdb@latest` (or use the installer above).
+2. Inside Claude Code: `/plugin marketplace add walkindude/cli-bridge && /plugin install cli-bridge@cli-bridge`.
+3. Inside Claude Code: `/cli-bridge:register gosymdb` (uses the canonical `cli-bridge-manifest` subcommand — no `--help` scraping).
+
+Restart Claude Code and all `gosymdb_*` tools appear in the MCP tool list.
 
 ## Commands
 
@@ -35,7 +60,6 @@ gosymdb blast-radius --symbol 'github.com/walkindude/gosymdb/indexer.IndexModule
 | `callees` | What does a function call? |
 | `blast-radius` | Full transitive impact analysis with test/prod split |
 | `dead` | Symbols with no callers (dead code candidates) |
-| `trace` | Single-shot overview: def + callers + callees + blast radius |
 | `implementors` | Types implementing an interface, or interfaces a type satisfies |
 | `references` | Where a type is used: assertions, switches, composite literals, conversions |
 | `packages` | All indexed packages with symbol counts |
@@ -72,21 +96,10 @@ gosymdb is designed for AI coding agents. Every command produces structured JSON
 
 Run `gosymdb agent-context` at the start of any agent session to get the full command reference.
 
-### Claude Code plugin
+### Environment variables
 
-gosymdb ships as a [Claude Code plugin](https://docs.anthropic.com/en/docs/claude-code/plugins) with three skills:
+- `GOSYMDB_ENV_GIT=1` — populate the `env.git` block (branch, dirty count, fetch age, etc.) on every response. Off by default because it costs ~7 subprocess `git` calls per query; turn it on if your agent consumes this info.
 
-- **sym** — find a Go symbol (replaces grep/rg for definition lookup)
-- **trace** — full symbol profile in one call (def + callers + callees + blast radius)
-- **impact** — check what breaks before changing a symbol
-
-Install locally:
-
-```bash
-claude plugin install --dir /path/to/gosymdb
-```
-
-The plugin handles binary installation, index creation, and stale-index detection automatically.
 
 ## License
 

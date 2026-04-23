@@ -40,7 +40,6 @@ func execAgentContext(flagDB string) error {
 		"gosymdb callees",
 		"gosymdb blast-radius",
 		"gosymdb dead",
-		"gosymdb trace",
 		"gosymdb packages",
 		"gosymdb health",
 		"gosymdb implementors",

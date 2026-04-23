@@ -1254,58 +1254,6 @@ func TestDeadSymbolsLimit(t *testing.T) {
 	}
 }
 
-// ---- TraceSymbol ----
-
-func TestTraceSymbolFound(t *testing.T) {
-	s, root := seedPhase3(t)
-	pkg := root + "/alpha"
-	res, err := s.TraceSymbol(ctx, pkg+".calledFunc", 20, 20)
-	if err != nil {
-		t.Fatalf("TraceSymbol: %v", err)
-	}
-	if res == nil {
-		t.Fatal("TraceSymbol returned nil for known symbol")
-	}
-	if res.Symbol == nil || res.Symbol.FQName != pkg+".calledFunc" {
-		t.Errorf("Symbol.FQName mismatch: %+v", res.Symbol)
-	}
-	callerFound := false
-	for _, c := range res.Callers {
-		if c.From == pkg+".Caller" {
-			callerFound = true
-		}
-	}
-	if !callerFound {
-		t.Errorf("expected Caller in callers; got %+v", res.Callers)
-	}
-}
-
-func TestTraceSymbolNotFound(t *testing.T) {
-	s, root := seedPhase3(t)
-	res, err := s.TraceSymbol(ctx, root+"/alpha.NoSuchFunc", 20, 20)
-	if err != nil {
-		t.Fatalf("TraceSymbol for unknown symbol returned error: %v", err)
-	}
-	if res != nil {
-		t.Errorf("expected nil for unknown symbol; got %+v", res)
-	}
-}
-
-func TestTraceSymbolBlastTotal(t *testing.T) {
-	s, root := seedPhase3(t)
-	pkg := root + "/alpha"
-	res, err := s.TraceSymbol(ctx, pkg+".calledFunc", 20, 20)
-	if err != nil {
-		t.Fatalf("TraceSymbol: %v", err)
-	}
-	if res == nil {
-		t.Fatal("nil result")
-	}
-	if res.BlastTotal < 1 {
-		t.Errorf("BlastTotal should be >= 1; got %d", res.BlastTotal)
-	}
-}
-
 // ---- hint methods ----
 
 func TestResolveSymbolNameFound(t *testing.T) {
