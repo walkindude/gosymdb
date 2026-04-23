@@ -20,8 +20,15 @@
           inherit version;
           src = ./.;
 
+          # Fetch dependencies via the Go module proxy (GOPROXY) rather than
+          # `go mod vendor`. More reproducible across Go toolchain bumps —
+          # the module-cache layout is stable while vendor tree layout can
+          # shift between Go minor versions.
+          proxyVendor = true;
+
           # Replace with the hash `nix build` prints on first build.
-          # Bump whenever go.sum changes.
+          # Bump whenever go.sum changes. The nix-hash-check CI job enforces
+          # this — a stale hash here fails PR checks.
           vendorHash = pkgs.lib.fakeHash;
 
           ldflags = [

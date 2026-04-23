@@ -54,6 +54,20 @@ jobs:
         with:
           version: "v2.11.4"
 
+  nix:
+    # Builds the flake on every PR + push to master. Catches vendorHash
+    # drift when go.sum changes — nix prints the expected hash on
+    # mismatch; paste it into flake.nix and push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: nix flake check
+        run: nix flake check --no-build
+      - name: nix build
+        run: nix build .#default
+
   dev-build:
     # Build dev-<sha> binaries on every push to master so contributors can
     # grab the latest unreleased build as a workflow artifact.
