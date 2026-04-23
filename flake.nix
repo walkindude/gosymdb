@@ -20,6 +20,12 @@
           inherit version;
           src = ./.;
 
+          # testbench/*/ each have their own go.mod (they're adversarial
+          # parser-test fixtures, not part of the main module). Restrict
+          # to the root package so buildGoModule doesn't try to compile
+          # them as if they belonged to github.com/walkindude/gosymdb.
+          subPackages = [ "." ];
+
           # Fetch dependencies via the Go module proxy (GOPROXY) rather than
           # `go mod vendor`. More reproducible across Go toolchain bumps —
           # the module-cache layout is stable while vendor tree layout can
