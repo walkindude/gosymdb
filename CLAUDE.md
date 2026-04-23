@@ -43,7 +43,6 @@ working with a non-default path.
 | List all symbols in the DB | — | `gosymdb find --json` (up to `--limit`) |
 | What implements this interface? | `grep -r "interface" .` | `gosymdb implementors --iface <name> --json` |
 | What breaks if I change this? | Guess | `gosymdb blast-radius --symbol <fqname> --json` |
-| Full picture of a symbol | Three separate commands | `gosymdb trace --symbol <fqname> --json` |
 | List all packages | — | `gosymdb packages --json` |
 | Index quality report | — | `gosymdb health --json` |
 | Dead code candidates | — | `gosymdb dead --pkg <prefix> --json` |
@@ -74,13 +73,17 @@ Never guess fqnames. Never construct them by hand.
 # 1. Find it
 gosymdb find --q MyThing --json
 
-# 2. Get full picture in one call
-gosymdb trace --symbol <fqname> --json
+# 2. Get the exact definition
+gosymdb def MyThing --json
 
-# 3. If it's an interface, find implementors
+# 3. Who calls it? What does it call?
+gosymdb callers --symbol <fqname> --json
+gosymdb callees --symbol <fqname> --json
+
+# 4. If it's an interface, find implementors
 gosymdb implementors --iface MyThing --json
 
-# 4. If you're about to change it, check blast radius first
+# 5. If you're about to change it, check blast radius first
 gosymdb blast-radius --symbol <fqname> --depth 5 --json
 ```
 
