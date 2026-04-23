@@ -26,10 +26,10 @@
           # shift between Go minor versions.
           proxyVendor = true;
 
-          # Replace with the hash `nix build` prints on first build.
-          # Bump whenever go.sum changes. The nix-hash-check CI job enforces
-          # this — a stale hash here fails PR checks.
-          vendorHash = pkgs.lib.fakeHash;
+          # Bump whenever go.sum changes. The nix CI job catches drift —
+          # a stale hash fails the `nix build` step with the expected
+          # value printed in the error.
+          vendorHash = "sha256-sG+MIJlXykWWtfuIifDBhwQTD9+nFa5UAGxyYDqHWc8=";
 
           ldflags = [
             "-s"

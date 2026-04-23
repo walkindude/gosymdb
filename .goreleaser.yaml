@@ -54,7 +54,7 @@ nfpms:
     package_name: gosymdb
     vendor: walkindude
     homepage: "https://github.com/walkindude/gosymdb"
-    maintainer: "Stefano Mioli <stefano.mioli@gmail.com>"
+    maintainer: "Stefano Mioli <s@mioli.me>"
     description: "Go symbol and call-graph database backed by SQLite"
     license: Apache-2.0
     formats:
