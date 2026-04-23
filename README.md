@@ -91,7 +91,7 @@ gosymdb is designed for AI coding agents. Every command produces structured JSON
 - Fully-qualified symbol names (no ambiguity)
 - File paths and line numbers (jump-to-definition)
 - Structured errors with `error_code`, `hint`, and `recovery` fields
-- Environment envelope (`env.stale_packages`, `env.git`) on every response
+- Environment envelope on every response (`env.stale_packages` always; `env.git` branch/dirty state when `GOSYMDB_ENV_GIT=1`)
 - `agent-context` command for one-shot API discovery
 
 Run `gosymdb agent-context` at the start of any agent session to get the full command reference.
