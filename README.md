@@ -24,6 +24,16 @@ Or with the Go toolchain:
 go install github.com/walkindude/gosymdb@latest
 ```
 
+Or with [Nix](https://nixos.org/) flakes:
+
+```bash
+nix profile install github:walkindude/gosymdb
+# or for a one-off run:
+nix run github:walkindude/gosymdb -- --help
+# or drop into a dev shell with go + gopls:
+nix develop github:walkindude/gosymdb
+```
+
 ## Quick start
 
 ```bash
