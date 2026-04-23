@@ -23,6 +23,7 @@ func newIndexCmd() *cobra.Command {
 	var enableCGO bool
 	var force bool
 	var withTests bool
+	var benchJSON bool
 
 	cmd := &cobra.Command{
 		Use:           "index",
@@ -32,7 +33,7 @@ func newIndexCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dbPath, _ := cmd.Root().PersistentFlags().GetString("db")
 			asJSON, _ := cmd.Root().PersistentFlags().GetBool("json")
-			return runIndex(dbPath, root, enableCGO, force, withTests, asJSON)
+			return runIndex(dbPath, root, enableCGO, force, withTests, asJSON, benchJSON)
 		},
 	}
 
@@ -42,11 +43,20 @@ func newIndexCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&enableCGO, "cgo", false, "set CGO_ENABLED=1 while loading packages")
 	cmd.Flags().BoolVar(&force, "force", false, "force full rebuild (drop and recreate all tables)")
 	cmd.Flags().BoolVar(&withTests, "tests", false, "include *_test.go files in symbol indexing")
+	cmd.Flags().BoolVar(&benchJSON, "bench-json", false, "")
+	_ = cmd.Flags().MarkHidden("bench-json")
 
 	return cmd
 }
 
-func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON bool) error {
+func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON, benchJSON bool) error {
+	var m0 runtime.MemStats
+	if benchJSON {
+		runtime.GC()
+		runtime.ReadMemStats(&m0)
+	}
+	benchStart := time.Now()
+
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -66,7 +76,12 @@ func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON bool) err
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	dbClosed := false
+	defer func() {
+		if !dbClosed {
+			_ = db.Close()
+		}
+	}()
 
 	if force {
 		if err := indexer.ResetSchema(db); err != nil {
@@ -130,6 +145,41 @@ func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON bool) err
 	}
 
 	log.Printf("done: %d modules, %d symbols, %d calls, %d unresolved, %d type_refs", len(modules), totalSymbols, totalCalls, totalUnresolved, totalTypeRefs)
+
+	if benchJSON {
+		if err := db.Close(); err != nil {
+			log.Printf("warn: db close: %v", err)
+		}
+		dbClosed = true
+		wallNs := time.Since(benchStart).Nanoseconds()
+		var m1 runtime.MemStats
+		runtime.ReadMemStats(&m1)
+		dbSize := int64(-1)
+		if fi, err := os.Stat(dbPath); err == nil {
+			dbSize = fi.Size()
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(map[string]any{
+			"wall_ns":           wallNs,
+			"total_alloc_bytes": m1.TotalAlloc - m0.TotalAlloc,
+			"heap_alloc_bytes":  m1.HeapAlloc,
+			"sys_bytes":         m1.Sys,
+			"num_gc":            m1.NumGC - m0.NumGC,
+			"pause_total_ns":    m1.PauseTotalNs - m0.PauseTotalNs,
+			"mallocs":           m1.Mallocs - m0.Mallocs,
+			"frees":             m1.Frees - m0.Frees,
+			"db_path":           dbPath,
+			"db_size_bytes":     dbSize,
+			"modules":           len(modules),
+			"symbols":           totalSymbols,
+			"calls":             totalCalls,
+			"unresolved":        totalUnresolved,
+			"type_refs":         totalTypeRefs,
+			"go_version":        runtime.Version(),
+			"tool_version":      Version,
+		})
+	}
 
 	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
