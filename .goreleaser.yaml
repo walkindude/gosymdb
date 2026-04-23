@@ -30,6 +30,39 @@ archives:
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
+brews:
+  - name: gosymdb
+    repository:
+      owner: walkindude
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    directory: Formula
+    homepage: "https://github.com/walkindude/gosymdb"
+    description: "Go symbol and call-graph database backed by SQLite"
+    license: Apache-2.0
+    install: |
+      bin.install "gosymdb"
+    test: |
+      system "#{bin}/gosymdb", "version"
+
+nfpms:
+  - id: gosymdb
+    package_name: gosymdb
+    vendor: walkindude
+    homepage: "https://github.com/walkindude/gosymdb"
+    maintainer: "Stefano Mioli <stefano.mioli@gmail.com>"
+    description: "Go symbol and call-graph database backed by SQLite"
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+
 release:
   prerelease: auto
 
