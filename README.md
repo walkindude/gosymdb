@@ -1,7 +1,7 @@
 # gosymdb
 
 [![CI](https://github.com/walkindude/gosymdb/actions/workflows/ci.yml/badge.svg)](https://github.com/walkindude/gosymdb/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/walkindude/gosymdb)](https://goreportcard.com/report/github.com/walkindude/gosymdb)
+[![Go Report Card](https://goreportcard.com/badge/github.com/walkindude/gosymdb?style=flat)](https://goreportcard.com/report/github.com/walkindude/gosymdb)
 [![Go Reference](https://pkg.go.dev/badge/github.com/walkindude/gosymdb.svg)](https://pkg.go.dev/github.com/walkindude/gosymdb)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2)](https://modelcontextprotocol.io)

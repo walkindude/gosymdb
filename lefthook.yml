@@ -19,3 +19,16 @@ pre-commit:
       run: |
         go mod tidy
         git diff --exit-code -- go.mod go.sum
+    # Warn (don't block) when go.sum is staged without flake.nix.
+    # The Nix vendorHash in flake.nix is tied to the module graph; changing
+    # go.sum without repinning will fail the `nix` CI job with a helpful
+    # error printing the correct hash to paste into flake.nix.
+    nix-hash-reminder:
+      glob: "go.{sum,mod}"
+      run: |
+        if ! git diff --cached --name-only | grep -qx 'flake.nix'; then
+          printf '\n\033[1;33m⚠\033[0m go.sum/go.mod is staged but flake.nix is not.\n'
+          printf '  The nix CI job will fail with a hash mismatch and print\n'
+          printf '  the correct vendorHash — paste it into flake.nix (line ~38).\n\n'
+        fi
+        exit 0
