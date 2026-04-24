@@ -47,6 +47,19 @@ To add a new test module:
 2. Add assertions in `internal/cmd/testbench_test.go`
 3. Update `testbench/CATALOG.json` with the new module entry
 
+### Adversarial regression tests
+
+Some fixtures under `testbench/` encode bugs found during adversarial review — the aliases/generics cases in `testbench/alias_generic_consistency/` (bench22) and the package-filter leak in `testbench/blast_pkg_filter/` (bench23) are the current examples, each cross-referenced to `docs/adversarial/round-20260328.md`. These are **release gates**, not incidental examples. Do not remove, weaken, or rewrite them unless the underlying behavior is intentionally changing — in which case update the adversarial report in the same commit so the change is auditable.
+
+### Contract tests
+
+Two tests in `internal/cmd/` guard the agent-facing contract against drift:
+
+- `TestCLIBridgeManifestMatchesCobra` — keeps `cli_bridge_spec.json` in sync with the Cobra command surface (command names, flag names, and declared globals). Adding a Cobra command? Add it to the manifest, or add it to the `excludedFromManifest` allowlist with a reason.
+- `TestAgentContextMatchesCobra` — keeps `agent-context`'s command list in sync with Cobra. Adding a Cobra command? Append it to `agentContextOrder`, or add it to `excludedFromAgentContext` with a reason.
+
+If either test fails after a command/flag change, the message names the missing side — update it there instead of silencing the test.
+
 ## Commit conventions
 
 Use [Conventional Commits](https://www.conventionalcommits.org/). The release
