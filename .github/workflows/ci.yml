@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Unit tests
+        run: go test -race ./internal/cmd/... ./indexer/... ./store/... -count=1
+
+      - name: Testbench
+        run: go test -race ./internal/cmd/... -run TestBench -count=1
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: "v2.11.4"
+
+  nix:
+    # Builds the flake on every PR + push to master. Catches vendorHash
+    # drift when go.sum changes — nix prints the expected hash on
+    # mismatch; paste it into flake.nix and push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: nix flake check
+        run: nix flake check --no-build
+      - name: nix build
+        run: nix build .#default
+
+  dev-build:
+    # Build dev-<sha> binaries on every push to master so contributors can
+    # grab the latest unreleased build as a workflow artifact.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [test, vuln, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build dev-<sha> binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          VERSION="dev-${SHA}"
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          BIN="gosymdb_${VERSION}_${GOOS}_${GOARCH}${EXT}"
+          go build -trimpath -ldflags "-s -w -X github.com/walkindude/gosymdb/internal/cmd.Version=${VERSION}" -o "$BIN" .
+          echo "BIN=$BIN" >> "$GITHUB_ENV"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosymdb-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.BIN }}
+          retention-days: 30

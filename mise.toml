@@ -1,0 +1,10 @@
+# Local dev tools for gosymdb. CI also uses `jdx/mise-action` so the same
+# versions run locally and in GitHub Actions.
+#
+# Usage:
+#   mise install        # fetches go, golangci-lint, lefthook
+#   lefthook install    # wires the pre-commit hooks
+[tools]
+go = "1.26"
+golangci-lint = "2.11.4"
+"ubi:evilmartians/lefthook" = "latest"

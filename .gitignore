@@ -1,0 +1,8 @@
+*.sqlite
+*.exe
+/gosymdb
+/gosymdb-*
+cmd.test.exe
+bench_history.jsonl
+dist/
+coverage.out

@@ -1,0 +1,21 @@
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      glob: "*.go"
+      run: |
+        files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' | tr -d '\r')
+        if [ -z "$files" ]; then exit 0; fi
+        printf '%s\n' "$files" | while IFS= read -r f; do
+          [ -z "$f" ] && continue
+          gofmt -w "$f"
+          git add "$f"
+        done
+    golangci-lint:
+      glob: "*.go"
+      run: ./tools/golangci-lint.sh run --new-from-rev=HEAD~1
+    gomod-tidy:
+      glob: "*.go"
+      run: |
+        go mod tidy
+        git diff --exit-code -- go.mod go.sum

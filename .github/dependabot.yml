@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Rome
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    groups:
+      # Patch bumps collapse into one PR — safe to auto-merge on green CI.
+      gomod-patch:
+        update-types:
+          - patch
+    # Minor and major bumps get individual PRs so they land in the
+    # manual-review queue. Go's module graph doesn't distinguish
+    # dev vs runtime deps, so every minor bump deserves a look.
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Rome
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions:
+        update-types:
+          - patch
+          - minor

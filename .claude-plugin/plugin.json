@@ -1,0 +1,20 @@
+{
+  "name": "gosymdb",
+  "version": "0.0.0",
+  "description": "Go symbol and call-graph database — replaces grep for code navigation",
+  "author": "walkindude",
+  "homepage": "https://github.com/walkindude/gosymdb",
+  "license": "Apache-2.0",
+  "keywords": ["go", "golang", "symbols", "call-graph", "code-navigation"],
+  "skills": {
+    "sym": {
+      "description": "Find a Go symbol. Use INSTEAD of grep/rg when looking for where a function, type, or method is defined."
+    },
+    "trace": {
+      "description": "Full profile of a Go symbol — definition, callers, callees, blast radius in one call. Use BEFORE reading source files."
+    },
+    "impact": {
+      "description": "Check what breaks before changing a Go symbol. Use BEFORE any refactor, rename, or signature change."
+    }
+  }
+}

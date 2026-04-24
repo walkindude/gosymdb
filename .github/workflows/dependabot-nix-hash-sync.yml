@@ -1,0 +1,112 @@
+name: Dependabot nix hash sync
+
+# When Dependabot opens/updates a gomod PR that changes go.sum, this job
+# runs `nix build`, captures the expected vendorHash from the failure,
+# writes it to flake.nix, and commits back to the PR branch. The required
+# `nix` check then re-runs green and the PR's auto-merge can fire.
+#
+# Security:
+# - `pull_request_target` exposes secrets and contents:write, so we gate
+#   strictly on PR author == dependabot[bot]. Dependabot PRs come from
+#   branches in this repo (not forks) and Dependabot is trusted.
+# - The job checks out the PR head but only runs `nix build` + sed; no
+#   arbitrary PR-controlled code executes.
+# - When this workflow pushes back, `GITHUB_TOKEN`-authored pushes do not
+#   re-trigger workflows (recursive-loop protection) — required CI checks
+#   may need a close+reopen ritual to re-run. Permanent fix: swap to a PAT
+#   or GitHub App token for the push (deferred).
+
+on:
+  pull_request_target:
+    paths:
+      - 'go.sum'
+      - 'go.mod'
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  hash-sync:
+    # Check the PR author, not github.actor. See dependabot-auto-merge.yml
+    # for the reasoning — `@dependabot rebase` from a human makes the actor
+    # the commenter, not Dependabot.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Should sync?
+        id: check
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Compare against live base branch, not the stale base.sha on the
+          # event (which drifts as master advances — flake.nix changes on
+          # master would then falsely look like PR-local changes).
+          git fetch origin "$BASE_REF" --quiet
+          MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+          CHANGED=$(git diff --name-only "$MERGE_BASE" HEAD)
+          echo "Files changed in PR:"
+          echo "$CHANGED" | sed 's/^/  /'
+          if echo "$CHANGED" | grep -qx 'flake.nix'; then
+            echo "sync=skip" >> "$GITHUB_OUTPUT"
+            echo "flake.nix is already modified in this PR; skipping."
+          elif echo "$CHANGED" | grep -qxE 'go\.(sum|mod)'; then
+            echo "sync=run" >> "$GITHUB_OUTPUT"
+          else
+            echo "sync=skip" >> "$GITHUB_OUTPUT"
+            echo "go.sum/go.mod not modified in this PR; nothing to do."
+          fi
+
+      - uses: DeterminateSystems/nix-installer-action@main
+        if: steps.check.outputs.sync == 'run'
+
+      - name: Compute expected vendorHash
+        if: steps.check.outputs.sync == 'run'
+        id: hash
+        run: |
+          # nix build fails with a hash mismatch on go.sum drift. Its
+          # stderr contains a three-line block:
+          #   error: hash mismatch in fixed-output derivation '/nix/store/...':
+          #            specified: sha256-OLD
+          #               got:    sha256-NEW
+          # The "##[error]To correct the hash mismatch ..." annotation in
+          # the Actions UI is added by DeterminateSystems AFTER nix exits
+          # and is NOT in nix's own stderr — don't grep for it.
+          nix build .#default 2> build.log || true
+          NEW_HASH=$(grep -E '^\s+got:\s+sha256-' build.log \
+                     | grep -oE 'sha256-[A-Za-z0-9+/=]+' \
+                     | head -1)
+          if [ -z "$NEW_HASH" ]; then
+            echo "No 'got: sha256-...' line found in build.log."
+            echo "Last 30 lines of build.log:"
+            tail -30 build.log
+            exit 0
+          fi
+          echo "hash=$NEW_HASH" >> "$GITHUB_OUTPUT"
+          echo "Expected vendorHash: $NEW_HASH"
+
+      - name: Commit flake.nix to PR branch
+        if: steps.hash.outputs.hash != ''
+        env:
+          NEW_HASH: ${{ steps.hash.outputs.hash }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Replace the single `vendorHash = "sha256-...";` line in flake.nix.
+          # gosymdb's flake only contains one such line.
+          sed -i -E "s|vendorHash = \"sha256-[^\"]*\";|vendorHash = \"$NEW_HASH\";|" flake.nix
+          if git diff --quiet flake.nix; then
+            echo "flake.nix already has the correct vendorHash."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.nix
+          git commit -m "chore(nix): repin vendorHash after go.sum update"
+          git push origin "HEAD:$HEAD_REF"
