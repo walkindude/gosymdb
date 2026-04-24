@@ -63,7 +63,6 @@ LOC, not complexity — the point is raw throughput:
 |---|---|---|
 | kubernetes | container orchestration | v1.31.0 |
 | cockroach | distributed SQL | v24.2.0 |
-| moby | docker engine | v27.3.0 |
 | terraform | IaC | v1.9.5 |
 | istio | service mesh | 1.23.0 |
 
