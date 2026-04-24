@@ -65,35 +65,33 @@
     {
       "name": "find",
       "description": "Search symbols by name, package, file, or kind. All filters optional; omitting all returns every symbol up to --limit.",
-      "usage": "gosymdb find [--q <text>] [--pkg <prefix>] [--file <path>] [--kind <kind>] [--limit N] [--json]",
+      "usage": "gosymdb find [--q <text>] [--pkg <prefix>] [--file <path>] [--kind <kind>] [--limit N]",
       "flags": [
         { "name": "q", "description": "Substring match on fqname/name/signature.", "required": false, "type": "string" },
         { "name": "pkg", "description": "Full package path prefix filter (e.g. github.com/owner/repo/internal/cmd). Short names like 'cmd' will not match.", "required": false, "type": "string" },
         { "name": "kind", "description": "Filter by symbol kind: func, method, type, interface, var, const.", "required": false, "type": "string", "enum": ["func", "method", "type", "interface", "var", "const"] },
         { "name": "file", "description": "Filter by file path substring.", "required": false, "type": "string" },
         { "name": "count", "description": "Print only the integer count to stdout.", "required": false, "type": "boolean", "default": false },
-        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 100 },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 100 }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "def",
       "description": "Exact single-symbol lookup by name or fully-qualified name. Returns one result or an ambiguity list with a --pkg hint.",
-      "usage": "gosymdb def <name> [--pkg <prefix>] [--json]",
+      "usage": "gosymdb def <name> [--pkg <prefix>]",
       "args": [
         { "name": "name", "description": "Symbol name or fully-qualified name (fqname) to look up.", "required": true, "type": "string" }
       ],
       "flags": [
-        { "name": "pkg", "description": "Disambiguate by package path prefix when name matches multiple symbols.", "required": false, "type": "string" },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "pkg", "description": "Disambiguate by package path prefix when name matches multiple symbols.", "required": false, "type": "string" }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "callers",
       "description": "Direct or transitive callers of a symbol (BFS up to --depth N). Use --depth 1 for direct callers only.",
-      "usage": "gosymdb callers --symbol <fqname> [--depth N] [--fuzzy] [--pkg <prefix>] [--is-test] [--json]",
+      "usage": "gosymdb callers --symbol <fqname> [--depth N] [--fuzzy] [--pkg <prefix>] [--is-test]",
       "flags": [
         { "name": "symbol", "description": "fqname or short name (auto-resolved if unambiguous). Get exact fqname from find/def. Required.", "required": true, "type": "string" },
         { "name": "depth", "description": "Transitive caller depth (1=direct only, max 10).", "required": false, "type": "number", "default": 1 },
@@ -103,15 +101,14 @@
         { "name": "include-unresolved", "description": "Also return unresolved references.", "required": false, "type": "boolean", "default": false },
         { "name": "count", "description": "Print only the integer count to stdout.", "required": false, "type": "boolean", "default": false },
         { "name": "explain", "description": "Show normalized inputs, active filters, and traversal settings.", "required": false, "type": "boolean", "default": false },
-        { "name": "limit", "description": "Row limit (applies per BFS hop).", "required": false, "type": "number", "default": 200 },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "limit", "description": "Row limit (applies per BFS hop).", "required": false, "type": "number", "default": 200 }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "callees",
       "description": "List all symbols called by a symbol (one hop, inverse of callers). Shows what a function calls.",
-      "usage": "gosymdb callees --symbol <fqname> [--fuzzy] [--pkg <prefix>] [--unique] [--json]",
+      "usage": "gosymdb callees --symbol <fqname> [--fuzzy] [--pkg <prefix>] [--unique]",
       "flags": [
         { "name": "symbol", "description": "fqname or short name (auto-resolved if unambiguous). Get exact fqname from find. Required.", "required": true, "type": "string" },
         { "name": "fuzzy", "description": "Also match symbols containing --symbol as a substring.", "required": false, "type": "boolean", "default": false },
@@ -119,15 +116,14 @@
         { "name": "include-unresolved", "description": "Include external/stdlib calls.", "required": false, "type": "boolean", "default": true },
         { "name": "unique", "description": "One row per callee instead of per call site.", "required": false, "type": "boolean", "default": false },
         { "name": "count", "description": "Print only the integer count to stdout.", "required": false, "type": "boolean", "default": false },
-        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "blast-radius",
       "description": "Transitive callers of a symbol — full impact at every depth, with test/prod split. Use before refactoring.",
-      "usage": "gosymdb blast-radius --symbol <fqname> [--depth N] [--exclude-tests] [--json]",
+      "usage": "gosymdb blast-radius --symbol <fqname> [--depth N] [--exclude-tests]",
       "flags": [
         { "name": "symbol", "description": "Exact full fqname as stored in index. Get it from find. Required.", "required": true, "type": "string" },
         { "name": "fuzzy", "description": "Also match symbols containing --symbol as a substring.", "required": false, "type": "boolean", "default": false },
@@ -135,77 +131,67 @@
         { "name": "pkg", "description": "Restrict results to callers in this package path prefix.", "required": false, "type": "string" },
         { "name": "exclude-tests", "description": "Omit test callers from results and traversal.", "required": false, "type": "boolean", "default": false },
         { "name": "explain", "description": "Show normalized inputs and recursive traversal filters.", "required": false, "type": "boolean", "default": false },
-        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 500 },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 500 }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "dead",
       "description": "List symbols with no callers (dead code candidates). Unexported symbols only by default.",
-      "usage": "gosymdb dead [--pkg <prefix>] [--kind func|method] [--include-exported] [--json]",
+      "usage": "gosymdb dead [--pkg <prefix>] [--kind func|method] [--include-exported]",
       "flags": [
         { "name": "kind", "description": "Filter by kind: func or method (default: both).", "required": false, "type": "string", "enum": ["func", "method"] },
         { "name": "pkg", "description": "Filter by package path prefix.", "required": false, "type": "string" },
         { "name": "include-exported", "description": "Include exported symbols (default: unexported only).", "required": false, "type": "boolean", "default": false },
-        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "implementors",
       "description": "Find types that implement an interface, or interfaces a type satisfies. Bridges the gap callers/callees can't cross.",
-      "usage": "gosymdb implementors (--iface <partial> | --type <partial>) [--json]",
+      "usage": "gosymdb implementors (--iface <partial> | --type <partial>)",
       "flags": [
         { "name": "iface", "description": "Partial interface fqname → returns implementing types. Required unless --type given.", "required": false, "type": "string" },
         { "name": "type", "description": "Partial type fqname → returns satisfied interfaces. Required unless --iface given.", "required": false, "type": "string" },
         { "name": "explain", "description": "Show normalized mode and query matching details.", "required": false, "type": "boolean", "default": false },
-        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "references",
       "description": "Find where a type is used: type assertions, type switches, composite literals, conversions, field accesses, embeds.",
-      "usage": "gosymdb references --symbol <fqname|short> [--ref-kind <kind>] [--pkg <prefix>] [--json]",
+      "usage": "gosymdb references --symbol <fqname|short> [--ref-kind <kind>] [--pkg <prefix>]",
       "flags": [
         { "name": "symbol", "description": "Type fqname or short name. Get exact fqname from find/def. Required.", "required": true, "type": "string" },
         { "name": "pkg", "description": "Filter by package_path prefix.", "required": false, "type": "string" },
         { "name": "ref-kind", "description": "Filter by reference kind: type_assert, type_switch, composite_lit, conversion, field_access, embed.", "required": false, "type": "string", "enum": ["type_assert", "type_switch", "composite_lit", "conversion", "field_access", "embed"] },
         { "name": "from", "description": "Filter by from_fqname substring.", "required": false, "type": "string" },
         { "name": "limit", "description": "Row limit.", "required": false, "type": "number", "default": 200 },
-        { "name": "count", "description": "Print only the integer count to stdout.", "required": false, "type": "boolean", "default": false },
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
+        { "name": "count", "description": "Print only the integer count to stdout.", "required": false, "type": "boolean", "default": false }
       ],
       "output": { "format": "json" }
     },
     {
       "name": "packages",
       "description": "List all indexed packages with symbol and function counts.",
-      "usage": "gosymdb packages [--json]",
-      "flags": [
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
-      ],
+      "usage": "gosymdb packages",
+      "flags": [],
       "output": { "format": "json" }
     },
     {
       "name": "health",
       "description": "Report index quality: symbol/call counts, load warnings, and unresolved-call ratio.",
-      "usage": "gosymdb health [--json]",
-      "flags": [
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
-      ],
+      "usage": "gosymdb health",
+      "flags": [],
       "output": { "format": "json" }
     },
     {
       "name": "agent-context",
       "description": "Dump complete API reference for all commands in one shot. Use this to bootstrap an agent's knowledge of gosymdb.",
-      "usage": "gosymdb agent-context [--json]",
-      "flags": [
-        { "name": "json", "description": "JSON output.", "required": false, "type": "boolean", "default": false }
-      ],
+      "usage": "gosymdb agent-context",
+      "flags": [],
       "output": { "format": "json" }
     }
   ]
