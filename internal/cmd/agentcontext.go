@@ -26,28 +26,45 @@ func newAgentContextCmd() *cobra.Command {
 	return cmd
 }
 
+// agentContextOrder is the ordered list of subcommand keys emitted by
+// `gosymdb agent-context`. Adding a new query/indexer subcommand? Append it
+// here (or mark it excluded in excludedFromAgentContext with a reason).
+// TestAgentContextMatchesCobra enforces that this list and the Cobra command
+// surface stay in sync.
+var agentContextOrder = []string{
+	"gosymdb index",
+	"gosymdb find",
+	"gosymdb def",
+	"gosymdb callers",
+	"gosymdb callees",
+	"gosymdb blast-radius",
+	"gosymdb dead",
+	"gosymdb packages",
+	"gosymdb health",
+	"gosymdb implementors",
+	"gosymdb references",
+}
+
+// excludedFromAgentContext lists Cobra subcommands that are intentionally
+// omitted from the agent-context payload. Each entry is a Cobra command
+// Name() with a short reason. TestAgentContextMatchesCobra enforces that
+// every Cobra subcommand is either in agentContextOrder or in this map.
+var excludedFromAgentContext = map[string]string{
+	"agent-context":       "self — already loaded by the agent when this payload arrives",
+	"version":             "operator/version info, not a code-navigation primitive",
+	"cli-bridge-manifest": "registration/metadata command consumed by cli-bridge itself",
+	"log-tool-use":        "internal telemetry helper, not agent-callable",
+	"help":                "cobra built-in",
+	"completion":          "cobra built-in shell-completion generator",
+}
+
 // execAgentContext emits the full API reference + env block.
 // flagDB is the value of the --db flag as resolved by PersistentPreRunE
 // (may equal defaultDB if no DB was found). When called from tests without
 // a cobra context, pass "" to trigger cwd-based discovery.
 func execAgentContext(flagDB string) error {
-	// Ordered list of subcommand keys — root and agent-context omitted (self-evident).
-	order := []string{
-		"gosymdb index",
-		"gosymdb find",
-		"gosymdb def",
-		"gosymdb callers",
-		"gosymdb callees",
-		"gosymdb blast-radius",
-		"gosymdb dead",
-		"gosymdb packages",
-		"gosymdb health",
-		"gosymdb implementors",
-		"gosymdb references",
-	}
-
-	specs := make([]agentHelp, 0, len(order))
-	for _, key := range order {
+	specs := make([]agentHelp, 0, len(agentContextOrder))
+	for _, key := range agentContextOrder {
 		if spec, ok := helpSpecs[key]; ok {
 			specs = append(specs, spec)
 		}
