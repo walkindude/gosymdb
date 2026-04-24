@@ -30,8 +30,10 @@ archives:
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
-brews:
+homebrew_casks:
   - name: gosymdb
+    binaries:
+      - gosymdb
     repository:
       owner: walkindude
       name: homebrew-tap
@@ -40,14 +42,23 @@ brews:
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/walkindude/gosymdb"
     description: "Go symbol and call-graph database backed by SQLite"
-    license: Apache-2.0
-    install: |
-      bin.install "gosymdb"
-    test: |
-      system "#{bin}/gosymdb", "version"
+    # Tell brew the download origin is trusted — suppresses the "verified:"
+    # prompt on unnotarized binaries.
+    url:
+      verified: github.com/walkindude/gosymdb
+    # Strip macOS Gatekeeper's quarantine flag on install, so users don't
+    # have to right-click → Open on first run. The CLI is unsigned
+    # (no Apple Developer Program subscription), so this is the accepted
+    # workaround; users who want signed binaries can compile from source.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gosymdb"]
+          end
 
 nfpms:
   - id: gosymdb
