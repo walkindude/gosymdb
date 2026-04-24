@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"$PWD\"; while [ \"$d\" != / ]; do [ -f \"$d/gosymdb.sqlite\" ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"REMINDER: gosymdb is indexed for this codebase. Use gosymdb commands instead of grep for symbol navigation. Run: gosymdb find --q <query> --json, or use /gosymdb:sym, /gosymdb:trace, /gosymdb:impact skills. Grep is only appropriate for non-symbol searches (string literals, TODOs, config values).\"}}' && exit 0; d=$(dirname \"$d\"); done",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}

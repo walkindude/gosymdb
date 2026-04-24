@@ -1,0 +1,378 @@
+{
+  "version": "0.3.0",
+  "generated": "2026-03-20",
+  "target_tool": "gosymdb",
+  "target_version": "0.1.0",
+  "summary": {
+    "total_modules": 21,
+    "total_tests": 106,
+    "passed": 105,
+    "failed": 1,
+    "categories": {
+      "bugs_open": 1,
+      "bugs_fixed": 7,
+      "limitations": 5
+    }
+  },
+  "bugs": [
+    {
+      "id": "BUG-001",
+      "severity": "high",
+      "status": "FIXED",
+      "fixed_in": "2026-03-19",
+      "title": "callers returns 'fqname mismatch' for symbols referenced only from package-level scope",
+      "module": "02_func_values",
+      "description": "Functions referenced only in package-level composite literals (map values, slice elements) exist in the index but `callers` returned 0 with hint 'Exact fqname mismatch'. Fixed by attributing package-scope call edges to a synthetic `init$var:<name>` caller fqname that round-trips correctly through the callers query.",
+      "affected_commands": ["callers", "blast-radius", "dead"],
+      "fix_notes": "indexer/index.go: var-init call walker now uses synthetic fqname `<pkg>.init$var:<varname>` for package-level composite literal and var-init call edges.",
+      "affected_symbols": [
+        "testbench/func_values.subtract — only in map literal",
+        "testbench/func_values.greet — only in slice literal",
+        "testbench/func_values.farewell — only in slice literal"
+      ]
+    },
+    {
+      "id": "BUG-002",
+      "severity": "high",
+      "status": "FIXED",
+      "fixed_in": "2026-03-19",
+      "title": "callers returns 0 for functions called directly in package-level var initializers",
+      "module": "12_var_init_calls",
+      "description": "Functions called in `var x = f()` at package scope showed 0 callers. Fixed by the same synthetic caller fqname approach as BUG-001.",
+      "affected_commands": ["callers", "blast-radius", "dead"],
+      "fix_notes": "Same fix as BUG-001 — package-level var init call edges now attributed to `<pkg>.init$var:<varname>`.",
+      "affected_symbols": [
+        "testbench/var_init_calls.initA — var a = initA()",
+        "testbench/var_init_calls.initB — var b = initB(a)"
+      ]
+    },
+    {
+      "id": "BUG-003",
+      "severity": "medium",
+      "status": "FIXED",
+      "fixed_in": "2026-03-19",
+      "title": "Ref edges for method values/expressions inside function bodies attributed to package, not enclosing function",
+      "module": "13_method_exprs",
+      "description": "Method value captures (c.Add) and method expression captures ((*Calculator).Add) inside function bodies were stored with from_fqname=<package_path> instead of from_fqname=<enclosing_function>. This meant blast-radius found callers=[package_path] at depth 1, then nothing at depth 2. Fixed by restructuring the func-ref pass to mirror the call-edge pass: iterate per FuncDecl and use objectFQName(obj) as from_fqname, with synthetic init$var: from for package-scope var declarations.",
+      "affected_commands": ["callers", "blast-radius"],
+      "fix_notes": "indexer/index.go: func-ref pass now attributes refs to enclosing function fqname (like the call-edge pass), not the package path.",
+      "fix_result": "blast-radius of Calculator.Add now returns total=1 with fqname=testbench/method_exprs.main (correct: all refs are in main() which has no callers in this standalone module). Previously returned fqname=testbench/method_exprs (package path synthetic).",
+      "notes": "The original expected total>=2 (main + applyOp or applyBound) was too optimistic — applyBound receives c.Add as a function parameter and calls it via `op(n)`, which requires type-flow analysis to resolve. Total=1 with correct fqname is the accurate result for static analysis."
+    },
+    {
+      "id": "BUG-004",
+      "severity": "medium",
+      "status": "OPEN",
+      "title": "Chained call expressions are unresolved",
+      "module": "02_func_values",
+      "description": "Expressions like `tripleNest()()()` produce unresolved call entries. The first call (`tripleNest()`) resolves fine, but the second and third calls (on the return values) cannot be resolved because the callee is a function-typed return value, not a named symbol. Test assertion added to run_tests.sh (section 02).",
+      "affected_commands": ["callees"],
+      "repro": {
+        "steps": [
+          "gosymdb index --root ./02_func_values --db test.sqlite --force",
+          "gosymdb callees --db test.sqlite --symbol testbench/func_values.main --json"
+        ],
+        "expected": "Chained calls resolve through return types",
+        "actual": "2 unresolved entries of type *ast.CallExpr at line 70"
+      },
+      "root_cause_hypothesis": "The call resolver operates on AST node types. When the callee expression is itself a CallExpr, type information would be needed to resolve the target. gosymdb uses AST-level analysis without full type inference for call targets."
+    },
+    {
+      "id": "BUG-005",
+      "severity": "low",
+      "status": "FIXED",
+      "fixed_in": "2026-03-19",
+      "title": "Interface dispatch produces 0 callers for concrete methods (no cross-reference hint)",
+      "module": "03_interface_dispatch",
+      "description": "When callers returns 0 for a method that implements an interface, no hint was provided to check implementors. Fixed: the callers command now queries the implements table and emits a hint suggesting `gosymdb implementors --iface <iface>`. The underlying 0-callers result is expected (see LIM-004).",
+      "affected_commands": ["callers"],
+      "fix_notes": "cmd/callers.go: interfaceDispatchHint() queries implements table for the symbol; emits hint in JSON when callers_count=0."
+    },
+    {
+      "id": "BUG-006",
+      "severity": "medium",
+      "status": "FIXED",
+      "fixed_in": "2026-03-20",
+      "title": "Function references in local variable assignments are not tracked",
+      "module": "14_local_func_refs",
+      "description": "When a function is stored in a local variable via short decl (`h := fn`), long decl (`var h func(...) = fn`), or post-declaration assignment (`h = fn`), the ref edge to `fn` is NOT recorded. This means `fn` appears to have 0 callers even though it is clearly referenced and available for use. Composite literals (slice/map elements) and direct argument passing DO create ref edges correctly — only simple assignment statements are missed. Also affects named function types (`var h Handler = fn`).",
+      "affected_commands": ["callers", "blast-radius", "dead"],
+      "repro": {
+        "steps": [
+          "gosymdb index --root ./14_local_func_refs --db test.sqlite --force",
+          "gosymdb callers --db test.sqlite --symbol 'testbench/local_func_refs.assignedViaShortDecl' --json"
+        ],
+        "expected": "callers_count >= 1 (assigned in main via h := assignedViaShortDecl)",
+        "actual": "callers_count = 0"
+      },
+      "root_cause_hypothesis": "The func-ref walker (in indexer/index.go) handles composite literals and function call arguments, but does not walk the RHS of ast.AssignStmt or ast.ValueSpec (local var declarations) for function-typed identifiers. The fix would be to walk assign statement RHS for Ident/SelectorExpr nodes whose type is a function type.",
+      "fix_notes": "indexer/index.go: recordRefs switch now includes *ast.AssignStmt (walks Rhs) and *ast.ValueSpec (walks Values). resolveAndInsertRef already guards against non-function types, so only refs to function-typed objects produce edges. Unit test TestBUG006_LocalFuncRefsTracked added to indexer/indexer_test.go using new testdata/samplemod/localfuncrefs package."
+    },
+    {
+      "id": "BUG-007",
+      "severity": "low",
+      "status": "FIXED",
+      "fixed_in": "2026-03-20",
+      "title": "--tests flag causes duplicate symbol indexing and build-cache symbol leakage",
+      "module": "15_testmain",
+      "description": "When `gosymdb index --tests` is used to include `_test.go` files, two problems occur: (1) non-test symbols from the regular package are indexed twice — once from the normal package load and once from the test compilation unit; (2) auto-generated test-main symbols from the Go build cache (e.g., `testbench/testmain.test.benchmarks`, `test.main`) are indexed as if they were user-defined symbols. This pollutes the symbol table and causes callers counts to be inflated.",
+      "affected_commands": ["find", "callers", "dead", "health"],
+      "repro": {
+        "steps": [
+          "gosymdb index --root ./15_testmain --db test.sqlite --force --tests",
+          "gosymdb find --db test.sqlite --q 'setup' --pkg testbench/testmain --json"
+        ],
+        "expected": "count = 1 (setup defined once in pkg.go)",
+        "actual": "count = 2 (setup indexed from both regular and test package loads)"
+      },
+      "root_cause_hypothesis": "The Go package loader, when loading test variants, produces both the regular package and the test-augmented package as separate entries. gosymdb indexes both without deduplication. The build-cache leakage occurs because the test binary package is also exposed by the loader.",
+      "fix_notes": "indexer/index.go: added deduplicateTestPackages() called after packages.Load when withTests=true. Drops (1) the generated test-binary package (ID ends in '.test' without '[') and (2) normal variants whose PkgPath also has a test-augmented variant (ID contains '['). Unit test TestBUG007_TestsNoDuplicateSymbols added."
+    },
+    {
+      "id": "BUG-008",
+      "severity": "medium",
+      "status": "FIXED",
+      "fixed_in": "2026-03-20",
+      "title": "dead command reports interface implementation methods as dead (false positives)",
+      "module": "17_interface_dead",
+      "description": "Methods on concrete types that satisfy an interface — but are called exclusively through interface dispatch — showed 0 entries in the calls table (no direct static call edge). The dead query only filtered by calls.to_fqname, so all such methods were incorrectly flagged as dead. The fix adds a NOT EXISTS join against the implements table: any method whose receiver type is recorded as an implementor is excluded from the dead set.",
+      "affected_commands": ["dead"],
+      "repro": {
+        "steps": [
+          "gosymdb index --root ./17_interface_dead --db test.sqlite --force",
+          "gosymdb dead --db test.sqlite --pkg testbench/interface_dead --include-exported --json"
+        ],
+        "expected": "RealDoer.Do, RealDoer.Tag, StubDoer.Do, StubDoer.Tag, Processor.Do, Processor.Tag NOT in dead set",
+        "actual": "All six methods incorrectly reported as dead"
+      },
+      "fix_notes": "store/sqlite/read.go DeadSymbols WHERE clause: added AND NOT EXISTS (SELECT 1 FROM implements i WHERE s.fqname LIKE i.impl_fqname || '.%' OR s.fqname LIKE i.impl_pkg || '.*' || SUBSTR(i.impl_fqname, LENGTH(i.impl_pkg) + 2) || '.%'). The LIKE patterns handle both value receivers (pkg.TypeName.Method) and pointer receivers (pkg.*TypeName.Method) since the implements table stores type-level fqnames without the method suffix. Unit test TestDeadDoesNotReportInterfaceImpls added to cmd/commands_test.go."
+    }
+  ],
+  "limitations": [
+    {
+      "id": "LIM-001",
+      "title": "Reflect-based calls are invisible",
+      "module": "01_reflect_calls",
+      "description": "Functions called via reflect.Value.MethodByName or reflect.Value.Call have no static call edge. This is an inherent limitation of static analysis — the method name is a runtime string. Affects any reflect-heavy codebase: plugin systems, ORMs, serializers, RPC frameworks.",
+      "impact": "False positives in `dead` command. Undercount in `callers` and `blast-radius`.",
+      "possible_mitigations": [
+        "Heuristic: scan for reflect.MethodByName string literals and create synthetic edges",
+        "Allow users to annotate symbols with //gosymdb:used-by-reflect",
+        "Accept as inherent — document prominently"
+      ]
+    },
+    {
+      "id": "LIM-002",
+      "title": "Build tags limit index to current GOOS/GOARCH",
+      "module": "08_build_tags",
+      "description": "Go's package loader respects build constraints, so files tagged for other platforms are excluded from the index. On Windows, linux-only and darwin-only functions are invisible. This means the index is always a partial view of a cross-platform codebase.",
+      "impact": "Missing symbols, missing call edges, false dead-code positives for platform-specific code.",
+      "possible_mitigations": [
+        "Index multiple times with GOOS/GOARCH overrides and merge results",
+        "Add --goos/--goarch flags to `index` command",
+        "Document as known limitation"
+      ]
+    },
+    {
+      "id": "LIM-003",
+      "title": "go:linkname aliases are not resolved to their targets",
+      "module": "05_linkname",
+      "description": "A function declared via go:linkname (e.g., `//go:linkname runtimeNanotime runtime.nanotime`) is indexed under its local name and callers are tracked. However, gosymdb does not record that runtimeNanotime IS runtime.nanotime. There is no way to query 'who calls runtime.nanotime indirectly through linkname aliases'.",
+      "impact": "Incomplete picture of runtime/stdlib function usage in code that uses linkname tricks.",
+      "possible_mitigations": [
+        "Parse go:linkname comments during indexing and store alias mappings",
+        "Create synthetic call edges from the local symbol to the remote symbol"
+      ]
+    },
+    {
+      "id": "LIM-004",
+      "title": "Interface dispatch callers are invisible (dynamic dispatch)",
+      "module": "03_interface_dispatch",
+      "description": "Concrete methods called exclusively through an interface variable show 0 callers. Static analysis cannot trace through runtime-resolved method dispatch. gosymdb addresses this partially: `implementors --iface X` reveals which types implement an interface, and `callers` emits a hint suggesting this when it returns 0 for an implementing method. But the actual call edges cannot be recovered without type flow analysis.",
+      "impact": "False dead-code positives for interface-driven code. Incomplete callers/blast-radius for methods only called through interfaces.",
+      "tests": [
+        "*FileWriter.Write: 0 static callers (interface dispatch — LIM-004, expected)",
+        "*FileWriter.Write: hint present suggesting implementors query",
+        "*NetWriter.Write: 0 static callers (interface dispatch — LIM-004, expected)",
+        "*NetWriter.Write: hint present suggesting implementors query",
+        "*Socket.Read: 0 static callers (interface dispatch — LIM-004, expected)",
+        "*Socket.Read: hint present suggesting implementors query",
+        "*Socket.Write: 0 static callers (interface dispatch — LIM-004, expected)",
+        "*Socket.Write: hint present suggesting implementors query",
+        "SneakyProcessor.Process: 0 static callers (any->assertion->interface — LIM-004)",
+        "SneakyProcessor.Process: hint present suggesting implementors query"
+      ],
+      "possible_mitigations": [
+        "Use implementors + caller lookup on the interface method together",
+        "Whole-program type analysis (e.g. golang.org/x/tools/go/callgraph/rta) to resolve dispatch",
+        "Accept as inherent — hint is provided when callers=0 for implementing methods"
+      ]
+    },
+    {
+      "id": "LIM-005",
+      "title": "Test files not indexed by default; --tests is now clean (BUG-007 fixed)",
+      "module": "15_testmain",
+      "description": "Without the `--tests` flag, `gosymdb index` does not index `_test.go` files. Functions called only from `TestMain`, test helpers, and test-only call edges are invisible. The `--is-test` flag on `callers` is designed to filter to test-file callers, but returns 0 for any function whose only callers are in test files, because those edges are never recorded. The `--tests` indexing flag does enable test files, but currently causes duplicate symbol registration (BUG-007).",
+      "impact": "Functions only called from TestMain or test setup/teardown appear dead. The `callers --is-test` feature has limited utility unless `--tests` is used at index time, which in turn triggers BUG-007.",
+      "tests": [
+        "TestMain not in standard index (LIM-005 — expected)",
+        "setup: 0 callers without --tests (LIM-005 — expected)",
+        "setup: has callers when indexed with --tests (feature works, but BUG-007 triggers)"
+      ],
+      "possible_mitigations": [
+        "Fix BUG-007 first, then --tests becomes a clean opt-in for test-file analysis",
+        "Add a dedicated 'gosymdb index --tests' mode that deduplicates symbols across regular and test compilation units",
+        "Document prominently: test-only callers require --tests at index time"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "id": "01_reflect_calls",
+      "target": "Reflect-based method invocation",
+      "tests": 2,
+      "passed": 2,
+      "findings": ["LIM-001"]
+    },
+    {
+      "id": "02_func_values",
+      "target": "Function values, closures, higher-order functions, indirect calls",
+      "tests": 6,
+      "passed": 6,
+      "findings": ["BUG-001 (FIXED)", "BUG-004"]
+    },
+    {
+      "id": "03_interface_dispatch",
+      "target": "Interface dispatch, type assertions through any, composed interfaces",
+      "tests": 13,
+      "passed": 13,
+      "findings": ["BUG-005 (FIXED)", "LIM-004"]
+    },
+    {
+      "id": "04_generics",
+      "target": "Generic functions, generic types, type parameter call edges",
+      "tests": 5,
+      "passed": 5,
+      "findings": []
+    },
+    {
+      "id": "05_linkname",
+      "target": "go:linkname, go:noinline, go:nosplit pragmas",
+      "tests": 5,
+      "passed": 5,
+      "findings": ["LIM-003"]
+    },
+    {
+      "id": "06_embedding_promo",
+      "target": "Promoted methods via embedding, shadowing, multi-level promotion",
+      "tests": 5,
+      "passed": 5,
+      "findings": []
+    },
+    {
+      "id": "07_init_chains",
+      "target": "Multiple init() per file/package, blank imports, init call edges",
+      "tests": 5,
+      "passed": 5,
+      "findings": []
+    },
+    {
+      "id": "08_build_tags",
+      "target": "Platform-specific build constraints",
+      "tests": 3,
+      "passed": 3,
+      "findings": ["LIM-002"]
+    },
+    {
+      "id": "09_type_assertions",
+      "target": "Type switches, chained type assertions, interface-to-interface assertions",
+      "tests": 6,
+      "passed": 6,
+      "findings": []
+    },
+    {
+      "id": "10_goroutine_defer",
+      "target": "go statements, defer statements, anonymous goroutines, deferred closures",
+      "tests": 5,
+      "passed": 5,
+      "findings": []
+    },
+    {
+      "id": "11_unicode_shadowing",
+      "target": "Unicode confusable identifiers, scope shadowing, builtin shadowing",
+      "tests": 5,
+      "passed": 5,
+      "findings": []
+    },
+    {
+      "id": "12_var_init_calls",
+      "target": "Function calls in package-level variable initializers",
+      "tests": 5,
+      "passed": 5,
+      "findings": ["BUG-002 (FIXED)"]
+    },
+    {
+      "id": "13_method_exprs",
+      "target": "Method expressions, method values, higher-order method passing",
+      "tests": 4,
+      "passed": 4,
+      "findings": ["BUG-003 (FIXED)"]
+    },
+    {
+      "id": "14_local_func_refs",
+      "target": "Function references in local variable declarations and assignments",
+      "tests": 5,
+      "passed": 5,
+      "findings": ["BUG-006 (FIXED)"]
+    },
+    {
+      "id": "15_testmain",
+      "target": "TestMain pattern, test file indexing, --is-test flag behavior",
+      "tests": 4,
+      "passed": 4,
+      "findings": ["LIM-005", "BUG-007 (FIXED)"]
+    },
+    {
+      "id": "16_closures_return",
+      "target": "Closures that return closures; call edges inside closure factories",
+      "tests": 4,
+      "passed": 4,
+      "findings": []
+    },
+    {
+      "id": "17_interface_dead",
+      "target": "dead command false positives for interface implementation methods",
+      "tests": 7,
+      "passed": 7,
+      "findings": ["BUG-008 (FIXED)"]
+    },
+    {
+      "id": "18_build_ignore",
+      "target": "//go:build ignore file exclusion from index",
+      "tests": 2,
+      "passed": 2,
+      "findings": []
+    },
+    {
+      "id": "19_named_func_types",
+      "target": "Named function types and struct function fields as ref targets",
+      "tests": 3,
+      "passed": 3,
+      "findings": []
+    },
+    {
+      "id": "20_iface_embedding",
+      "target": "Interface embedding: method set promotion, implementors, dispatch callers",
+      "tests": 7,
+      "passed": 7,
+      "findings": []
+    },
+    {
+      "id": "21_ref_edge_cases",
+      "target": "Function reference edge cases: return values, channel sends",
+      "tests": 3,
+      "passed": 3,
+      "findings": []
+    }
+  ]
+}

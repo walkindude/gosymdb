@@ -1,0 +1,26 @@
+[
+  {
+    "name": "kubernetes",
+    "repo": "https://github.com/kubernetes/kubernetes.git",
+    "ref": "v1.31.0",
+    "note": "one of the largest Go codebases in existence (~3M Go LOC)"
+  },
+  {
+    "name": "cockroach",
+    "repo": "https://github.com/cockroachdb/cockroach.git",
+    "ref": "v24.2.0",
+    "note": "distributed SQL database, very large"
+  },
+  {
+    "name": "terraform",
+    "repo": "https://github.com/hashicorp/terraform.git",
+    "ref": "v1.9.5",
+    "note": "hashicorp terraform core"
+  },
+  {
+    "name": "istio",
+    "repo": "https://github.com/istio/istio.git",
+    "ref": "1.23.0",
+    "note": "service mesh"
+  }
+]
