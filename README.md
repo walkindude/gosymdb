@@ -174,21 +174,22 @@ Run `gosymdb agent-context` at the start of any agent session to get the full co
 - `GOSYMDB_ENV_GIT=1` — populate the `env.git` block (branch, dirty count, fetch age, etc.) on every response. Off by default because it costs ~7 subprocess `git` calls per query; turn it on if your agent consumes this info.
 
 
+## API stability
+
+During v0.x, the supported contract is:
+
+- **Command names** — `index`, `find`, `def`, `callers`, `callees`, `blast-radius`, `dead`, `implementors`, `references`, `packages`, `health`, `agent-context`, `cli-bridge-manifest`, `version`.
+- **Flag names and types** — both command-local flags and the global `--db`, `--json`, `--auto-reindex`.
+- **JSON output shape** — field names, nesting, and error envelopes (`error_code`, `hint`, `recovery`) as emitted when `--json` is set.
+- **`env` block** on every JSON response: always `env.db` and `env.stale_packages`; `env.git` when `GOSYMDB_ENV_GIT=1`.
+
+Breaking changes to any of the above bump the minor version and are called out in release notes. Additive changes (new commands, new fields, new optional flags) are non-breaking and can land in patch releases. Tests consuming gosymdb's JSON should be resilient to unknown fields.
+
 ## For library users
 
-gosymdb is primarily a CLI. A few Go packages are publicly exported —
-`store`, `store/sqlite`, `indexer` — to make it possible to plug in
-alternative `store.Store` backends or drive the indexer from your own
-code. They are **not** intended as a stable library API.
+gosymdb is primarily a CLI. A few Go packages are publicly exported — `store`, `store/sqlite`, `indexer` — to make it possible to plug in alternative `store.Store` backends or drive the indexer from your own code. They are **not** intended as a stable library API.
 
-While gosymdb is in v0.x, these packages may change in any minor
-release: signatures, types, or whole packages can be renamed, moved,
-or removed. If you import them, pin an exact version and expect to
-read the changelog on every bump.
-
-The CLI surface (commands, flags, JSON output shape) is the stable
-contract during v0.x; breaking changes there will bump the minor
-version and be called out in release notes.
+While gosymdb is in v0.x, these packages may change in any minor release: signatures, types, or whole packages can be renamed, moved, or removed. If you import them, pin an exact version and expect to read the changelog on every bump.
 
 ## License
 
