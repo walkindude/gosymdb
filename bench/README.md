@@ -71,6 +71,13 @@ baseline rather than drifting via `main`.
 
 ## Honest caveats
 
+- **Tests and CGO are excluded by default.** The runner invokes
+  `gosymdb index --root <corpus> --db <trial.sqlite> --bench-json` with
+  no `--tests` and no `--cgo`. Numbers therefore reflect the non-test,
+  non-CGO loader view of each corpus, which is a meaningful fraction
+  smaller than the full tree — for kubernetes and cockroach, roughly
+  60–70% of the raw Go line count. When comparing throughput externally,
+  match this scope or say so.
 - **macOS-only wrapper.** `/usr/bin/time -l` output format differs on
   Linux. Porting is mechanical but hasn't been done yet.
 - **Unresolved calls are real.** The `unresolved` column exists precisely
