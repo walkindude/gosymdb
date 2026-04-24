@@ -11,9 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is set by ldflags at build time (Makefile / GoReleaser) and falls
-// back to runtime VCS info so `go install @main` binaries report a useful
-// dev-<sha> tag instead of a bare "dev".
+// Version is set by ldflags at build time (Makefile / GoReleaser). When not
+// set, init() below derives a useful value from runtime build info so that
+// `go install github.com/walkindude/gosymdb@vX.Y.Z` reports vX.Y.Z and
+// `go install .` from a checkout reports dev-<sha>, instead of bare "dev".
 var Version = "dev"
 
 const schemaVersion = 6
@@ -25,6 +26,13 @@ func init() {
 	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
+		return
+	}
+	// Module-installed binaries (e.g. `go install ...@v0.1.1`) have the
+	// resolved version in Main.Version. Local builds from a module source
+	// tree set it to "(devel)" — skip that and fall back to vcs.revision.
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		Version = v
 		return
 	}
 	for _, s := range info.Settings {
