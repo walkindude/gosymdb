@@ -8,9 +8,60 @@
 
 A Go symbol and call-graph database backed by SQLite. Index any Go module and query symbols, callers, callees, blast radius, dead code, interface implementors, and type references — all with structured JSON output designed for programmatic consumption.
 
+## What this is
+
+gosymdb is a local, Go-specific symbolic query CLI for coding agents. It uses Go's own package/type analysis (`go/packages`, `go/types` — the same loader the compiler uses) to build a persistent SQLite index, then answers repeatable JSON queries such as:
+
+- where is this symbol defined?
+- what calls this function?
+- what does this function call?
+- what breaks if I change this signature?
+- what implements this interface?
+- where is this type used?
+- which symbols are never called?
+
+## What this is not
+
+- **Not semantic search.** Queries are symbolic, not natural-language or embedding-based.
+- **Not multi-language.** Go only.
+- **Not hosted.** Everything runs locally. No telemetry.
+- **Not a replacement for `gopls`.** It complements `gopls` — see [gosymdb and gopls](#gosymdb-and-gopls).
+- **Not a replacement for Sourcegraph, Augment, or Cursor.** Those solve broader multi-language, team-scale, or IDE-native problems.
+
 ## Install
 
-**One command** (macOS/Linux):
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap walkindude/tap
+brew install --cask gosymdb
+```
+
+The cask strips macOS Gatekeeper's quarantine flag post-install so the binary runs on first invocation without `xattr` gymnastics.
+
+### Go toolchain
+
+```bash
+go install github.com/walkindude/gosymdb@latest
+```
+
+Requires Go 1.26+.
+
+### Linux packages (deb / rpm / apk)
+
+Download `.deb`, `.rpm`, or `.apk` for `amd64` / `arm64` from the [latest GitHub release](https://github.com/walkindude/gosymdb/releases/latest).
+
+### Nix
+
+```bash
+nix profile install github:walkindude/gosymdb
+# or one-off:
+nix run github:walkindude/gosymdb -- --help
+# or drop into a dev shell with go + gopls:
+nix develop github:walkindude/gosymdb
+```
+
+### Scripted installer (macOS / Linux / Windows)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/walkindude/gosymdb/master/install.sh | sh
@@ -22,23 +73,7 @@ Windows (PowerShell):
 iwr -useb https://raw.githubusercontent.com/walkindude/gosymdb/master/install.ps1 | iex
 ```
 
-The installer downloads the binary, verifies its checksum, and — if Claude Code is installed — generates the [cli-bridge](https://github.com/walkindude/cli-bridge) spec so gosymdb registers as a first-class MCP tool (see below).
-
-Or with the Go toolchain:
-
-```bash
-go install github.com/walkindude/gosymdb@latest
-```
-
-Or with [Nix](https://nixos.org/) flakes:
-
-```bash
-nix profile install github:walkindude/gosymdb
-# or for a one-off run:
-nix run github:walkindude/gosymdb -- --help
-# or drop into a dev shell with go + gopls:
-nix develop github:walkindude/gosymdb
-```
+Both installers download the binary, verify its SHA-256 checksum against the release's `checksums.txt`, and — if Claude Code is installed — generate the [cli-bridge](https://github.com/walkindude/cli-bridge) spec so gosymdb registers as a first-class MCP tool (see below).
 
 ## Quick start
 
@@ -95,6 +130,28 @@ gosymdb uses `go/packages` (the same loader the Go compiler uses) to parse and t
 - **Type references**: assertions, switches, composite literals, conversions, field access, embedding
 
 Everything is stored in a single SQLite file for fast, offline querying.
+
+## Known limitations
+
+gosymdb is a static symbolic index, not a runtime tracer. Some things it cannot know:
+
+- **Interface dispatch is not recorded as a direct call edge.** Use `implementors` to find concrete types, then run `callers`/`callees` against the concrete method. Caller responses include a `hint` field that flags this when relevant.
+- **Reflection** (`reflect.Value.Call`, method-value lookups) is not statically resolved.
+- **`go:linkname`, plugin loading, and runtime dispatch** are not modeled.
+- **Build tags affect what `go/packages` loads.** Symbols behind tags not active for your host won't be indexed.
+- **Generated code** is indexed only when it exists on disk and is part of the loaded package set — run your generator before indexing.
+- **CGO is off by default.** Pass `--cgo` to `index` when indexing CGO-dependent modules.
+- **Test files are excluded by default.** Pass `--tests` to include `*_test.go` symbols and the calls they contain.
+- **Query results depend on index freshness.** Check `env.stale_packages` on any response, or pass `--auto-reindex` to any query command to re-index stale modules on demand (uses a git fast-path when available).
+
+## gosymdb and gopls
+
+gosymdb complements [`gopls`](https://github.com/golang/tools/tree/master/gopls); it is not a replacement.
+
+- `gopls` is the live Language Server view of a workspace — interactive, in-process, built for the IDE inner loop.
+- gosymdb is a persistent SQLite query database — offline, scriptable, built for repeatable agent workflows: callers, callees, blast-radius, implementors, dead-code candidates, references, and `--json` output that diffs cleanly across runs.
+
+If you're editing code in an IDE, use `gopls`. If an agent needs to ask structural questions across a long session without maintaining an LSP conversation, use gosymdb.
 
 ## Privacy
 
