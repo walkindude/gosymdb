@@ -35,7 +35,7 @@
           # Bump whenever go.sum changes. The nix CI job catches drift —
           # a stale hash fails the `nix build` step with the expected
           # value printed in the error.
-          vendorHash = "sha256-sG+MIJlXykWWtfuIifDBhwQTD9+nFa5UAGxyYDqHWc8=";
+          vendorHash = "sha256-UZBXPuT+zMeZJoGAMqbCZBEBjQT71Tp5N7RF1jIq5pU=";
 
           ldflags = [
             "-s"
