@@ -724,6 +724,15 @@ func bench21(t *testing.T, e *benchEnv) {
 	}
 }
 
+// bench22 is an ADVERSARIAL REGRESSION TEST — do not weaken.
+//
+// It encodes findings #1, #2, and #3 from docs/adversarial/round-20260328.md
+// (type aliases not surfaced as implementors, generic instantiations not
+// represented, interface-method fqnames that appear as call targets but
+// cannot be resolved by `def`). These are release gates: if you are changing
+// the edge model or the symbol-naming scheme and these assertions start
+// failing, update docs/adversarial/round-20260328.md alongside the fix so
+// future readers know the behavior changed deliberately.
 func bench22(t *testing.T, e *benchEnv) {
 	// 22: ALIAS + GENERIC IMPLEMENTORS + CALL-TARGET CONSISTENCY
 	impls := bImpls(t, e, "testbench/alias_generic_consistency/alias.ReaderAlias")
@@ -753,6 +762,14 @@ func bench22(t *testing.T, e *benchEnv) {
 	}
 }
 
+// bench23 is an ADVERSARIAL REGRESSION TEST — do not weaken.
+//
+// It encodes finding #4 from docs/adversarial/round-20260328.md: the
+// `blast-radius --pkg` filter previously applied only to the seed branch of
+// the recursive CTE, leaking transitive callers from outside the requested
+// package prefix. This is a release gate — if the recursive CTE in
+// store/sqlite/read.go changes and this test regresses, blast-radius impact
+// reports become untrustworthy in monorepos.
 func bench23(t *testing.T, e *benchEnv) {
 	// 23: BLAST-RADIUS --pkg should restrict caller packages the same way callers does.
 	symbol := "testbench/blast_pkg_filter/core.Target"
