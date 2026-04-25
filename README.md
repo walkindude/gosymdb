@@ -131,6 +131,25 @@ gosymdb uses `go/packages` (the same loader the Go compiler uses) to parse and t
 
 Everything is stored in a single SQLite file for fast, offline querying.
 
+## Freshness loop
+
+The index goes stale the moment you edit a file. gosymdb closes the loop on its own.
+
+Every JSON response carries an `env` envelope that always includes `env.stale_packages` — the list of packages whose source has drifted from what's indexed. The agent sees it on every query, regardless of the command:
+
+```bash
+$ gosymdb find --q Store --json | jq '.env.stale_packages'
+["github.com/you/repo/store"]
+```
+
+Pass `--auto-reindex` to any query command and stale modules get re-indexed in place before the query runs. The staleness check itself is cheap enough to run on every call: a git fast-path uses `git diff` against the commit stamped at index time (one subprocess for the whole repo, sub-second on Kubernetes-scale codebases), with a per-file FNV-64a hash fallback for when git isn't usable.
+
+```bash
+gosymdb callers --symbol 'github.com/you/repo/store.Open' --auto-reindex --json
+```
+
+The shipped [`CLAUDE.md`](./CLAUDE.md) wires this up for agents: watch `env.stale_packages`, rebuild or pass `--auto-reindex`. A silent failure mode (querying a stale index) becomes a self-correcting feedback loop the agent doesn't have to be reminded about.
+
 ## Known limitations
 
 gosymdb is a static symbolic index, not a runtime tracer. Some things it cannot know:
@@ -142,7 +161,7 @@ gosymdb is a static symbolic index, not a runtime tracer. Some things it cannot 
 - **Generated code** is indexed only when it exists on disk and is part of the loaded package set — run your generator before indexing.
 - **CGO is off by default.** Pass `--cgo` to `index` when indexing CGO-dependent modules.
 - **Test files are excluded by default.** Pass `--tests` to include `*_test.go` symbols and the calls they contain.
-- **Query results depend on index freshness.** Check `env.stale_packages` on any response, or pass `--auto-reindex` to any query command to re-index stale modules on demand (uses a git fast-path when available).
+- **Query results depend on index freshness.** See [Freshness loop](#freshness-loop) — `env.stale_packages` flags drift on every response, and `--auto-reindex` self-heals before the query runs.
 
 ## gosymdb and gopls
 
