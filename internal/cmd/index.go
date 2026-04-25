@@ -49,13 +49,17 @@ func newIndexCmd() *cobra.Command {
 	return cmd
 }
 
+type indexCounts struct {
+	symbols, calls, unresolved, typeRefs, warnings int
+}
+
 func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON, benchJSON bool) error {
+	benchStart := time.Now()
 	var m0 runtime.MemStats
 	if benchJSON {
 		runtime.GC()
 		runtime.ReadMemStats(&m0)
 	}
-	benchStart := time.Now()
 
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -69,10 +73,7 @@ func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON, benchJSO
 		return fmt.Errorf("no go.mod found under %s", absRoot)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return err
-	}
-	db, err := sql.Open(sqlite.DriverName, dbPath)
+	db, err := openIndexDB(dbPath, force, modules)
 	if err != nil {
 		return err
 	}
@@ -83,114 +84,144 @@ func runIndex(dbPath, root string, enableCGO, force, withTests, asJSON, benchJSO
 		}
 	}()
 
-	if force {
-		if err := indexer.ResetSchema(db); err != nil {
-			return err
-		}
-	} else {
-		if err := indexer.EnsureSchema(db); err != nil {
-			return err
-		}
-		// Detect and purge orphaned modules (previously indexed but no longer on disk).
-		discovered := make(map[string]bool, len(modules))
-		for _, m := range modules {
-			discovered[m] = true
-		}
-		rows, err := db.Query(`SELECT DISTINCT module_root FROM package_meta`)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var prev string
-				if rows.Scan(&prev) == nil && !discovered[prev] {
-					log.Printf("purging deleted module %s ...", prev)
-					if err := indexer.PurgeModule(db, prev); err != nil {
-						log.Printf("warn: purge %s: %v", prev, err)
-					}
-				}
-			}
-		}
-	}
+	counts := indexAllModules(db, modules, enableCGO, withTests)
 
-	totalSymbols := 0
-	totalCalls := 0
-	totalUnresolved := 0
-	totalTypeRefs := 0
-	totalWarnings := 0
-	for i, mod := range modules {
-		log.Printf("[%d/%d] indexing %s ...", i+1, len(modules), mod)
-		symN, callN, unresN, typeRefN, err := indexer.IndexModule(db, mod, enableCGO, withTests)
-		totalSymbols += symN
-		totalCalls += callN
-		totalUnresolved += unresN
-		totalTypeRefs += typeRefN
-		if err != nil {
-			totalWarnings++
-			log.Printf("warn: module %s: %v", mod, err)
-		}
-		log.Printf("  done: %d symbols, %d calls, %d unresolved, %d type_refs", symN, callN, unresN, typeRefN)
-	}
-
-	// Capture the current git commit for stale-detection fast path.
-	indexedCommit := ""
-	if gitCmd := exec.Command("git", "rev-parse", "HEAD"); gitCmd != nil {
-		gitCmd.Dir = absRoot
-		if out, err := gitCmd.Output(); err == nil {
-			indexedCommit = strings.TrimSpace(string(out))
-		}
-	}
-
+	indexedCommit := captureGitCommit(absRoot)
 	if _, err := db.Exec(`INSERT INTO index_meta(tool_version, go_version, indexed_at, root, warnings, indexed_commit) VALUES (?, ?, ?, ?, ?, ?)`,
-		Version, runtime.Version(), time.Now().UTC().Format(time.RFC3339), absRoot, totalWarnings, indexedCommit); err != nil {
+		Version, runtime.Version(), time.Now().UTC().Format(time.RFC3339), absRoot, counts.warnings, indexedCommit); err != nil {
 		log.Printf("warn: index_meta insert: %v", err)
 	}
 
-	log.Printf("done: %d modules, %d symbols, %d calls, %d unresolved, %d type_refs", len(modules), totalSymbols, totalCalls, totalUnresolved, totalTypeRefs)
+	log.Printf("done: %d modules, %d symbols, %d calls, %d unresolved, %d type_refs",
+		len(modules), counts.symbols, counts.calls, counts.unresolved, counts.typeRefs)
 
 	if benchJSON {
 		if err := db.Close(); err != nil {
 			log.Printf("warn: db close: %v", err)
 		}
 		dbClosed = true
-		wallNs := time.Since(benchStart).Nanoseconds()
-		var m1 runtime.MemStats
-		runtime.ReadMemStats(&m1)
-		dbSize := int64(-1)
-		if fi, err := os.Stat(dbPath); err == nil {
-			dbSize = fi.Size()
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(map[string]any{
-			"wall_ns":           wallNs,
-			"total_alloc_bytes": m1.TotalAlloc - m0.TotalAlloc,
-			"heap_alloc_bytes":  m1.HeapAlloc,
-			"sys_bytes":         m1.Sys,
-			"num_gc":            m1.NumGC - m0.NumGC,
-			"pause_total_ns":    m1.PauseTotalNs - m0.PauseTotalNs,
-			"mallocs":           m1.Mallocs - m0.Mallocs,
-			"frees":             m1.Frees - m0.Frees,
-			"db_path":           dbPath,
-			"db_size_bytes":     dbSize,
-			"modules":           len(modules),
-			"symbols":           totalSymbols,
-			"calls":             totalCalls,
-			"unresolved":        totalUnresolved,
-			"type_refs":         totalTypeRefs,
-			"go_version":        runtime.Version(),
-			"tool_version":      Version,
-		})
+		return emitBenchJSON(dbPath, benchStart, m0, len(modules), counts)
 	}
-
 	if asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(map[string]any{
-			"indexed":    len(modules),
-			"symbols":    totalSymbols,
-			"calls":      totalCalls,
-			"unresolved": totalUnresolved,
-			"type_refs":  totalTypeRefs,
-		})
+		return emitIndexJSON(len(modules), counts)
 	}
 	return nil
+}
+
+func openIndexDB(dbPath string, force bool, modules []string) (*sql.DB, error) {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open(sqlite.DriverName, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if force {
+		if err := indexer.ResetSchema(db); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		return db, nil
+	}
+	if err := indexer.EnsureSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	purgeOrphanedModules(db, modules)
+	return db, nil
+}
+
+// purgeOrphanedModules drops index entries for modules that were previously
+// indexed but no longer exist on disk under the current root.
+func purgeOrphanedModules(db *sql.DB, modules []string) {
+	discovered := make(map[string]bool, len(modules))
+	for _, m := range modules {
+		discovered[m] = true
+	}
+	rows, err := db.Query(`SELECT DISTINCT module_root FROM package_meta`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var prev string
+		if rows.Scan(&prev) != nil || discovered[prev] {
+			continue
+		}
+		log.Printf("purging deleted module %s ...", prev)
+		if err := indexer.PurgeModule(db, prev); err != nil {
+			log.Printf("warn: purge %s: %v", prev, err)
+		}
+	}
+}
+
+func indexAllModules(db *sql.DB, modules []string, enableCGO, withTests bool) indexCounts {
+	var c indexCounts
+	for i, mod := range modules {
+		log.Printf("[%d/%d] indexing %s ...", i+1, len(modules), mod)
+		symN, callN, unresN, typeRefN, err := indexer.IndexModule(db, mod, enableCGO, withTests)
+		c.symbols += symN
+		c.calls += callN
+		c.unresolved += unresN
+		c.typeRefs += typeRefN
+		if err != nil {
+			c.warnings++
+			log.Printf("warn: module %s: %v", mod, err)
+		}
+		log.Printf("  done: %d symbols, %d calls, %d unresolved, %d type_refs", symN, callN, unresN, typeRefN)
+	}
+	return c
+}
+
+func captureGitCommit(absRoot string) string {
+	gitCmd := exec.Command("git", "rev-parse", "HEAD")
+	gitCmd.Dir = absRoot
+	out, err := gitCmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func emitBenchJSON(dbPath string, benchStart time.Time, m0 runtime.MemStats, modules int, c indexCounts) error {
+	wallNs := time.Since(benchStart).Nanoseconds()
+	var m1 runtime.MemStats
+	runtime.ReadMemStats(&m1)
+	dbSize := int64(-1)
+	if fi, err := os.Stat(dbPath); err == nil {
+		dbSize = fi.Size()
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(map[string]any{
+		"wall_ns":           wallNs,
+		"total_alloc_bytes": m1.TotalAlloc - m0.TotalAlloc,
+		"heap_alloc_bytes":  m1.HeapAlloc,
+		"sys_bytes":         m1.Sys,
+		"num_gc":            m1.NumGC - m0.NumGC,
+		"pause_total_ns":    m1.PauseTotalNs - m0.PauseTotalNs,
+		"mallocs":           m1.Mallocs - m0.Mallocs,
+		"frees":             m1.Frees - m0.Frees,
+		"db_path":           dbPath,
+		"db_size_bytes":     dbSize,
+		"modules":           modules,
+		"symbols":           c.symbols,
+		"calls":             c.calls,
+		"unresolved":        c.unresolved,
+		"type_refs":         c.typeRefs,
+		"go_version":        runtime.Version(),
+		"tool_version":      Version,
+	})
+}
+
+func emitIndexJSON(modules int, c indexCounts) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(map[string]any{
+		"indexed":    modules,
+		"symbols":    c.symbols,
+		"calls":      c.calls,
+		"unresolved": c.unresolved,
+		"type_refs":  c.typeRefs,
+	})
 }
