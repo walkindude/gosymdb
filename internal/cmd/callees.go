@@ -131,7 +131,6 @@ func execCallees(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 	if strings.TrimSpace(symbol) == "" {
 		return errors.New("--symbol is required")
 	}
-
 	if autoReindex {
 		checkAndAutoReindex(db, false, false)
 	}
@@ -140,13 +139,7 @@ func execCallees(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 	symbol, resolveNote = resolveSymbolInput(db, symbol, pkg)
 
 	ctx := context.Background()
-	opts := store.CalleesOpts{
-		Symbol: symbol,
-		Fuzzy:  fuzzy,
-		Pkg:    pkg,
-		Unique: unique,
-		Limit:  limit,
-	}
+	opts := store.CalleesOpts{Symbol: symbol, Fuzzy: fuzzy, Pkg: pkg, Unique: unique, Limit: limit}
 
 	if countOnly {
 		n, err := rs.CountCallees(ctx, opts)
@@ -157,11 +150,38 @@ func execCallees(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 		return nil
 	}
 
-	callees := make([]calleeRow, 0)
-	storeRows, err := rs.DirectCallees(ctx, opts)
+	callees, err := collectCallees(rs, ctx, opts)
 	if err != nil {
 		return err
 	}
+	unresolved := []calleesUnresolvedRow{}
+	if includeUnresolved {
+		urows, err := queryUnresolvedCallees(db, symbol, fuzzy, unique, limit)
+		if err != nil {
+			return err
+		}
+		if urows != nil {
+			unresolved = urows
+		}
+	}
+
+	if asJSON {
+		return emitCalleesJSON(db, dbPath, symbol, resolveNote, callees, unresolved)
+	}
+	printCallees(symbol, callees, unique)
+	printCalleesUnresolved(symbol, unresolved, unique)
+	if resolveNote != "" {
+		fmt.Printf("# %s\n", resolveNote)
+	}
+	return nil
+}
+
+func collectCallees(rs store.ReadStore, ctx context.Context, opts store.CalleesOpts) ([]calleeRow, error) {
+	storeRows, err := rs.DirectCallees(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]calleeRow, 0, len(storeRows))
 	for _, sr := range storeRows {
 		r := calleeRow{
 			To:          sr.FQName,
@@ -172,62 +192,52 @@ func execCallees(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 			PackagePath: sr.PackagePath,
 		}
 		r.Name = shortName(r.To)
-		if asJSON {
-			callees = append(callees, r)
-		} else {
-			if unique {
-				fmt.Printf("%s  [%s]\n", r.To, r.Kind)
-			} else {
-				marker := ""
-				if r.Kind == "ref" {
-					marker = "  [func-ref]"
-				}
-				fmt.Printf("%s -> %s\t%s:%d:%d%s\n", symbol, r.To, r.File, r.Line, r.Col, marker)
-			}
-		}
+		out = append(out, r)
 	}
+	return out, nil
+}
 
-	unresolved := make([]calleesUnresolvedRow, 0)
-	if includeUnresolved {
-		urows, err := queryUnresolvedCallees(db, symbol, fuzzy, unique, limit)
-		if err != nil {
-			return err
+func printCallees(symbol string, rows []calleeRow, unique bool) {
+	for _, r := range rows {
+		if unique {
+			fmt.Printf("%s  [%s]\n", r.To, r.Kind)
+			continue
 		}
-		for _, r := range urows {
-			if asJSON {
-				unresolved = append(unresolved, r)
-			} else {
-				if unique {
-					fmt.Printf("~> %s  [unresolved]\n", r.Expr)
-				} else {
-					fmt.Printf("%s ~> %s\t%s:%d:%d  [unresolved]\n", symbol, r.Expr, r.File, r.Line, r.Col)
-				}
-			}
+		marker := ""
+		if r.Kind == "ref" {
+			marker = "  [func-ref]"
 		}
+		fmt.Printf("%s -> %s\t%s:%d:%d%s\n", symbol, r.To, r.File, r.Line, r.Col, marker)
 	}
+}
 
-	if asJSON {
-		payload := map[string]any{
-			"callees":          callees,
-			"callees_count":    len(callees),
-			"unresolved":       unresolved,
-			"unresolved_count": len(unresolved),
-			"env":              collectEnv(dbPath),
+func printCalleesUnresolved(symbol string, rows []calleesUnresolvedRow, unique bool) {
+	for _, r := range rows {
+		if unique {
+			fmt.Printf("~> %s  [unresolved]\n", r.Expr)
+			continue
 		}
-		if resolveNote != "" {
-			payload["resolved"] = resolveNote
-		}
-		if len(callees) == 0 && len(unresolved) == 0 {
-			if h := symbolHint(db, symbol); h != "" {
-				payload["hint"] = h
-			}
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(payload)
+		fmt.Printf("%s ~> %s\t%s:%d:%d  [unresolved]\n", symbol, r.Expr, r.File, r.Line, r.Col)
+	}
+}
+
+func emitCalleesJSON(db *sql.DB, dbPath, symbol, resolveNote string, callees []calleeRow, unresolved []calleesUnresolvedRow) error {
+	payload := map[string]any{
+		"callees":          callees,
+		"callees_count":    len(callees),
+		"unresolved":       unresolved,
+		"unresolved_count": len(unresolved),
+		"env":              collectEnv(dbPath),
 	}
 	if resolveNote != "" {
-		fmt.Printf("# %s\n", resolveNote)
+		payload["resolved"] = resolveNote
 	}
-	return nil
+	if len(callees) == 0 && len(unresolved) == 0 {
+		if h := symbolHint(db, symbol); h != "" {
+			payload["hint"] = h
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(payload)
 }
