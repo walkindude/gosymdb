@@ -13,9 +13,14 @@ linters:
     - misspell
     - errcheck
     - gocritic
+    - gocyclo
     - gosec
     - nolintlint
   settings:
+    gocyclo:
+      # goreportcard flags any function with cyclomatic complexity > 15.
+      # Mirror that threshold here so the local gate, CI, and the badge agree.
+      min-complexity: 16
     errcheck:
       exclude-functions:
         - (*database/sql.Stmt).Close
@@ -45,6 +50,7 @@ linters:
           - unused
           - errcheck
           - gosec
+          - gocyclo
     paths:
       - testbench
       - testdata
