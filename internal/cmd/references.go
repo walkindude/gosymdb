@@ -51,6 +51,19 @@ func newReferencesCmd() *cobra.Command {
 	return cmd
 }
 
+type refRow struct {
+	From        string `json:"from"`
+	FromName    string `json:"from_name"`
+	To          string `json:"to"`
+	ToName      string `json:"to_name"`
+	RefKind     string `json:"ref_kind"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	Col         int    `json:"col"`
+	Expr        string `json:"expr"`
+	PackagePath string `json:"package_path"`
+}
+
 func execReferences(rs store.ReadStore, dbPath, symbol, pkg, refKind, from string, limit int, countOnly, asJSON bool) error {
 	if strings.TrimSpace(symbol) == "" {
 		return errors.New("--symbol is required")
@@ -60,24 +73,7 @@ func execReferences(rs store.ReadStore, dbPath, symbol, pkg, refKind, from strin
 	}
 
 	ctx := context.Background()
-
-	// Use the store's ResolveSymbolName to resolve a short name to a fqname.
-	resolvedSymbol := symbol
-	resolvedNote := ""
-	if !strings.Contains(symbol, "/") {
-		names, err := rs.ResolveSymbolName(ctx, symbol, pkg)
-		if err == nil {
-			switch len(names) {
-			case 1:
-				resolvedSymbol = names[0]
-				resolvedNote = "resolved short name '" + symbol + "' to '" + names[0] + "'"
-			case 0:
-				// leave as-is
-			default:
-				resolvedNote = "ambiguous short name '" + symbol + "' — use exact fqname or --pkg to disambiguate"
-			}
-		}
-	}
+	resolvedSymbol, resolvedNote := resolveTypeRef(ctx, rs, symbol, pkg)
 
 	opts := store.ReferencesOpts{
 		Symbol:  resolvedSymbol,
@@ -101,19 +97,6 @@ func execReferences(rs store.ReadStore, dbPath, symbol, pkg, refKind, from strin
 		return err
 	}
 
-	type refRow struct {
-		From        string `json:"from"`
-		FromName    string `json:"from_name"`
-		To          string `json:"to"`
-		ToName      string `json:"to_name"`
-		RefKind     string `json:"ref_kind"`
-		File        string `json:"file"`
-		Line        int    `json:"line"`
-		Col         int    `json:"col"`
-		Expr        string `json:"expr"`
-		PackagePath string `json:"package_path"`
-	}
-
 	results := make([]refRow, 0, len(result.Refs))
 	for _, r := range result.Refs {
 		results = append(results, refRow{
@@ -131,28 +114,53 @@ func execReferences(rs store.ReadStore, dbPath, symbol, pkg, refKind, from strin
 	}
 
 	if asJSON {
-		out := map[string]any{
-			"references":    results,
-			"count":         len(results),
-			"total_matched": result.TotalMatched,
-			"truncated":     result.TotalMatched > limit,
-			"env":           collectEnv(dbPath),
-		}
-		if resolvedNote != "" {
-			out["resolved"] = resolvedNote
-		}
-		if len(results) == 0 {
-			hints, _ := rs.SymbolHint(ctx, resolvedSymbol)
-			if len(hints) > 0 {
-				out["hint"] = "Exact fqname mismatch. Similar: " + strings.Join(hints, " | ") + ". Use exact fqname or --fuzzy."
-			}
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(out)
+		return emitReferencesJSON(ctx, rs, dbPath, resolvedSymbol, resolvedNote, results, result.TotalMatched, limit)
 	}
+	printReferences(ctx, rs, resolvedSymbol, resolvedNote, results, result.TotalMatched, limit)
+	return nil
+}
 
-	// Text output
+func resolveTypeRef(ctx context.Context, rs store.ReadStore, symbol, pkg string) (string, string) {
+	if strings.Contains(symbol, "/") {
+		return symbol, ""
+	}
+	names, err := rs.ResolveSymbolName(ctx, symbol, pkg)
+	if err != nil {
+		return symbol, ""
+	}
+	switch len(names) {
+	case 1:
+		return names[0], "resolved short name '" + symbol + "' to '" + names[0] + "'"
+	case 0:
+		return symbol, ""
+	default:
+		return symbol, "ambiguous short name '" + symbol + "' — use exact fqname or --pkg to disambiguate"
+	}
+}
+
+func emitReferencesJSON(ctx context.Context, rs store.ReadStore, dbPath, resolvedSymbol, resolvedNote string, results []refRow, totalMatched, limit int) error {
+	out := map[string]any{
+		"references":    results,
+		"count":         len(results),
+		"total_matched": totalMatched,
+		"truncated":     totalMatched > limit,
+		"env":           collectEnv(dbPath),
+	}
+	if resolvedNote != "" {
+		out["resolved"] = resolvedNote
+	}
+	if len(results) == 0 {
+		hints, _ := rs.SymbolHint(ctx, resolvedSymbol)
+		if len(hints) > 0 {
+			out["hint"] = "Exact fqname mismatch. Similar: " + strings.Join(hints, " | ") + ". Use exact fqname or --fuzzy."
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(out)
+}
+
+func printReferences(ctx context.Context, rs store.ReadStore, resolvedSymbol, resolvedNote string, results []refRow, totalMatched, limit int) {
 	if resolvedNote != "" {
 		fmt.Printf("note: %s\n\n", resolvedNote)
 	}
@@ -165,12 +173,11 @@ func execReferences(rs store.ReadStore, dbPath, symbol, pkg, refKind, from strin
 		if len(hints) > 0 {
 			fmt.Printf("hint: Exact fqname mismatch. Similar: %s. Use exact fqname.\n", strings.Join(hints, " | "))
 		}
-	} else {
-		fmt.Printf("\n%d reference(s)", len(results))
-		if result.TotalMatched > limit {
-			fmt.Printf(" (truncated; %d total)", result.TotalMatched)
-		}
-		fmt.Println()
+		return
 	}
-	return nil
+	fmt.Printf("\n%d reference(s)", len(results))
+	if totalMatched > limit {
+		fmt.Printf(" (truncated; %d total)", totalMatched)
+	}
+	fmt.Println()
 }
