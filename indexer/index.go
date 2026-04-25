@@ -255,63 +255,86 @@ func (r *indexRun) indexCallGraph() {
 		if pkg.Types == nil || pkg.TypesInfo == nil || len(pkg.Syntax) == 0 {
 			continue
 		}
-		fileByPos := buildFileByPos(pkg)
+		r.indexPackageCallGraph(pkg)
+	}
+}
 
-		onCall := func(from, to, filePath, expr string, line, col int) {
-			if _, err := r.insertCall.Exec(
-				r.moduleRoot, pkg.PkgPath, filePath, line, col, from, to, expr, "call",
-			); err == nil {
-				r.callCount++
-			}
+func (r *indexRun) indexPackageCallGraph(pkg *packages.Package) {
+	fileByPos := buildFileByPos(pkg)
+	onCall := r.makeCallEdgeRecorder(pkg)
+	onUnresolved := r.makeUnresolvedEdgeRecorder(pkg)
+	for _, f := range pkg.Syntax {
+		filePath := fileByPos[f]
+		scanFuncBodies(pkg, f, filePath, func(from, fp string, body ast.Node) {
+			scanCallsInNode(pkg, from, fp, body, onCall, onUnresolved)
+		})
+		scanCallGraphVarInits(pkg, f, filePath, onCall, onUnresolved)
+	}
+}
+
+func (r *indexRun) makeCallEdgeRecorder(pkg *packages.Package) func(from, to, filePath, expr string, line, col int) {
+	return func(from, to, filePath, expr string, line, col int) {
+		if _, err := r.insertCall.Exec(
+			r.moduleRoot, pkg.PkgPath, filePath, line, col, from, to, expr, "call",
+		); err == nil {
+			r.callCount++
 		}
-		onUnresolved := func(from, filePath, expr string, line, col int) {
-			if _, err := r.insertUnresolved.Exec(
-				r.moduleRoot, pkg.PkgPath, filePath, line, col, from, expr, "unresolved",
-			); err == nil {
-				r.unresolvedCount++
-			}
+	}
+}
+
+func (r *indexRun) makeUnresolvedEdgeRecorder(pkg *packages.Package) func(from, filePath, expr string, line, col int) {
+	return func(from, filePath, expr string, line, col int) {
+		if _, err := r.insertUnresolved.Exec(
+			r.moduleRoot, pkg.PkgPath, filePath, line, col, from, expr, "unresolved",
+		); err == nil {
+			r.unresolvedCount++
 		}
+	}
+}
 
-		for _, f := range pkg.Syntax {
-			filePath := fileByPos[f]
-
-			scanFuncBodies(pkg, f, filePath, func(from, fp string, body ast.Node) {
-				scanCallsInNode(pkg, from, fp, body, onCall, onUnresolved)
-			})
-
-			// Package-scope var initializers need special handling for FuncLit bodies.
-			for _, decl := range f.Decls {
-				gd, ok := decl.(*ast.GenDecl)
-				if !ok || gd.Tok != token.VAR {
-					continue
-				}
-				for _, spec := range gd.Specs {
-					vs, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					owner := "var"
-					if len(vs.Names) > 0 {
-						owner = vs.Names[0].Name
-					}
-					for _, value := range vs.Values {
-						syntheticFrom := fmt.Sprintf("%s.init$var:%s", pkg.PkgPath, owner)
-						scanCallsInNode(pkg, syntheticFrom, filePath, value, onCall, onUnresolved)
-
-						ast.Inspect(value, func(n ast.Node) bool {
-							lit, ok := n.(*ast.FuncLit)
-							if !ok || lit.Body == nil {
-								return true
-							}
-							from := funcLitFQName(pkg.PkgPath, owner, pkg.Fset.PositionFor(lit.Type.Func, false))
-							scanCallsInNode(pkg, from, filePath, lit.Body, onCall, onUnresolved)
-							return false
-						})
-					}
-				}
+// scanCallGraphVarInits walks each package-scope var initializer, recording
+// both the calls in the initializer expression itself and any calls inside
+// nested FuncLit bodies (which need a synthetic from-fqname tied to position).
+func scanCallGraphVarInits(pkg *packages.Package, f *ast.File, filePath string,
+	onCall func(from, to, filePath, expr string, line, col int),
+	onUnresolved func(from, filePath, expr string, line, col int),
+) {
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			owner := "var"
+			if len(vs.Names) > 0 {
+				owner = vs.Names[0].Name
+			}
+			for _, value := range vs.Values {
+				syntheticFrom := fmt.Sprintf("%s.init$var:%s", pkg.PkgPath, owner)
+				scanCallsInNode(pkg, syntheticFrom, filePath, value, onCall, onUnresolved)
+				scanFuncLitsInVarInit(pkg, owner, filePath, value, onCall, onUnresolved)
 			}
 		}
 	}
+}
+
+func scanFuncLitsInVarInit(pkg *packages.Package, owner, filePath string, value ast.Node,
+	onCall func(from, to, filePath, expr string, line, col int),
+	onUnresolved func(from, filePath, expr string, line, col int),
+) {
+	ast.Inspect(value, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok || lit.Body == nil {
+			return true
+		}
+		from := funcLitFQName(pkg.PkgPath, owner, pkg.Fset.PositionFor(lit.Type.Func, false))
+		scanCallsInNode(pkg, from, filePath, lit.Body, onCall, onUnresolved)
+		return false
+	})
 }
 
 // scanFuncBodies iterates function declarations in a file, calling fn with
