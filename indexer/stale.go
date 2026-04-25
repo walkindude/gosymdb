@@ -103,102 +103,122 @@ func gitFastPath(moduleRoot, packagePath, indexedCommit string) (bool, error) {
 	return false, nil
 }
 
+type storedFile struct {
+	path string
+	hash string
+}
+
 // fileHashFallback checks staleness by comparing stored file lists and hashes
 // against the current state on disk.
 func fileHashFallback(db *sql.DB, moduleRoot, packagePath string) (bool, error) {
+	storedFiles, err := loadStoredFiles(db, moduleRoot, packagePath)
+	if err != nil {
+		return true, err
+	}
+	// Pre-item13 DB has no stored file rows — treat as stale to force a rebuild.
+	if len(storedFiles) == 0 {
+		return true, nil
+	}
+	if hasNewProductionFiles(moduleRoot, packagePath, storedSetByBase(storedFiles)) {
+		return true, nil
+	}
+	stale, complete := comparePerFileHashes(storedFiles)
+	if stale {
+		return true, nil
+	}
+	if complete {
+		return false, nil
+	}
+	return comparePackageHashFromDB(db, moduleRoot, packagePath, storedFiles)
+}
+
+func loadStoredFiles(db *sql.DB, moduleRoot, packagePath string) ([]storedFile, error) {
 	rows, err := db.Query(
 		`SELECT file_path, file_hash FROM package_files WHERE module_root = ? AND package_path = ?`,
 		moduleRoot, packagePath,
 	)
 	if err != nil {
-		return true, fmt.Errorf("query package_files: %w", err)
+		return nil, fmt.Errorf("query package_files: %w", err)
 	}
 	defer rows.Close()
-
-	type storedFile struct {
-		path string
-		hash string
-	}
-	var storedFiles []storedFile
+	var out []storedFile
 	for rows.Next() {
 		var sf storedFile
 		if err := rows.Scan(&sf.path, &sf.hash); err != nil {
-			return true, err
+			return nil, err
 		}
-		storedFiles = append(storedFiles, sf)
+		out = append(out, sf)
 	}
-	if err := rows.Err(); err != nil {
-		return true, err
-	}
+	return out, rows.Err()
+}
 
-	// No stored files means pre-item13 DB — treat as stale.
-	if len(storedFiles) == 0 {
-		return true, nil
+func storedSetByBase(files []storedFile) map[string]bool {
+	s := make(map[string]bool, len(files))
+	for _, f := range files {
+		s[filepath.Base(f.path)] = true
 	}
+	return s
+}
 
-	// Build a set of stored file basenames for new-file detection.
-	storedSet := make(map[string]bool, len(storedFiles))
-	for _, sf := range storedFiles {
-		storedSet[filepath.Base(sf.path)] = true
-	}
-
-	// Check for new non-test .go files on disk that weren't in the index.
-	// We compare by basename rather than raw count because the index may
-	// exclude _test.go files (withTests=false), and a naive count would
-	// produce false positives when test files exist on disk.
+// hasNewProductionFiles returns true when the package directory contains a
+// non-test .go file not present in the indexed file list. Resolution failures
+// are treated as stale (conservative).
+func hasNewProductionFiles(moduleRoot, packagePath string, indexed map[string]bool) bool {
 	pkgDir, err := packageDir(moduleRoot, packagePath)
 	if err != nil {
-		return true, nil
+		return true
 	}
 	diskFiles, err := listGoFiles(pkgDir)
 	if err != nil {
-		return true, nil
+		return true
 	}
 	for _, df := range diskFiles {
 		base := filepath.Base(df)
-		if !storedSet[base] && !strings.HasSuffix(base, "_test.go") {
-			return true, nil
+		if !indexed[base] && !strings.HasSuffix(base, "_test.go") {
+			return true
 		}
 	}
+	return false
+}
 
-	// Compare per-file hashes from package_files.
-	for _, sf := range storedFiles {
+// comparePerFileHashes returns (stale, complete). complete=false means a stored
+// file lacked a hash and the per-file comparison was abandoned — caller should
+// fall back to the package-level files_hash check (matches legacy behavior).
+func comparePerFileHashes(files []storedFile) (stale, complete bool) {
+	for _, sf := range files {
 		if sf.hash == "" {
-			// No hash stored — fall through to package-level files_hash check.
-			goto packageHash
+			return false, false
 		}
 		currentHash, err := hashFile(sf.path)
-		if err != nil {
-			return true, nil // file missing or unreadable → stale
-		}
-		if currentHash != sf.hash {
-			return true, nil
+		if err != nil || currentHash != sf.hash {
+			return true, true
 		}
 	}
-	return false, nil
+	return false, true
+}
 
-packageHash:
-	// Compare stored files_hash from package_meta.
+func comparePackageHashFromDB(db *sql.DB, moduleRoot, packagePath string, files []storedFile) (bool, error) {
 	var storedHash string
-	err = db.QueryRow(
+	err := db.QueryRow(
 		`SELECT files_hash FROM package_meta WHERE module_root = ? AND package_path = ?`,
 		moduleRoot, packagePath,
 	).Scan(&storedHash)
 	if err != nil || storedHash == "" {
 		return true, nil
 	}
+	return computeAndCompareFilesHash(files, storedHash)
+}
 
-	// Compute current hash over the stored file list (same paths as index time).
-	var storedPaths []string
-	for _, sf := range storedFiles {
-		storedPaths = append(storedPaths, sf.path)
+func computeAndCompareFilesHash(files []storedFile, storedHash string) (bool, error) {
+	paths := make([]string, 0, len(files))
+	for _, sf := range files {
+		paths = append(paths, sf.path)
 	}
-	sort.Strings(storedPaths)
-	currentHash, err := ComputeFilesHash(storedPaths)
+	sort.Strings(paths)
+	currentHash, err := ComputeFilesHash(paths)
 	if err != nil {
 		return true, nil
 	}
-
 	return currentHash != storedHash, nil
 }
 
@@ -324,6 +344,52 @@ func hashFile(path string) (string, error) {
 
 // ---- store.ReadStore-backed variants (Phase 3) ----
 
+type gitFastPathState struct {
+	available    bool
+	repoRoot     string
+	changedFiles map[string]bool
+}
+
+func loadGitFastPathState(indexedCommit, moduleRoot string) gitFastPathState {
+	if indexedCommit == "" {
+		return gitFastPathState{}
+	}
+	root, err := gitRoot(moduleRoot)
+	if err != nil {
+		return gitFastPathState{}
+	}
+	changed, err := gitChangedFiles(moduleRoot, indexedCommit)
+	if err != nil {
+		return gitFastPathState{}
+	}
+	return gitFastPathState{available: true, repoRoot: root, changedFiles: changed}
+}
+
+// pkgStaleViaFastPath reports (handled, stale). When handled=false, caller must
+// fall back to the file-hash check.
+func pkgStaleViaFastPath(pkg store.PackageMetaRow, st gitFastPathState) (bool, bool) {
+	if !st.available {
+		return false, false
+	}
+	pkgDir, err := packageDir(pkg.ModuleRoot, pkg.PackagePath)
+	if err != nil {
+		return false, false
+	}
+	relPkg, err := filepath.Rel(st.repoRoot, pkgDir)
+	if err != nil {
+		return false, false
+	}
+	relPkg = filepath.ToSlash(relPkg)
+	prefix := relPkg + "/"
+	for f := range st.changedFiles {
+		f = filepath.ToSlash(f)
+		if f == relPkg || strings.HasPrefix(f, prefix) {
+			return true, true
+		}
+	}
+	return true, false
+}
+
 // StalePackagesStore is the store.ReadStore-backed version of StalePackages.
 // It runs the git diff once and checks all packages against the cached result,
 // avoiding per-package process spawns.
@@ -336,51 +402,18 @@ func StalePackagesStore(rs store.ReadStore) ([]string, error) {
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
-
-	// Read indexed_commit once (same for all packages).
 	indexedCommit, _ := rs.IndexedCommit(ctx)
-
-	// Run git diff once and cache the changed files set.
-	var changedFiles map[string]bool
-	var repoRoot string
-	gitFastPathAvailable := false
-	if indexedCommit != "" {
-		root, rootErr := gitRoot(pkgs[0].ModuleRoot)
-		if rootErr == nil {
-			changed, diffErr := gitChangedFiles(pkgs[0].ModuleRoot, indexedCommit)
-			if diffErr == nil {
-				changedFiles = changed
-				repoRoot = root
-				gitFastPathAvailable = true
-			}
-		}
-	}
+	fast := loadGitFastPathState(indexedCommit, pkgs[0].ModuleRoot)
 
 	var stale []string
 	for _, pkg := range pkgs {
-		if gitFastPathAvailable {
-			pkgDir, err := packageDir(pkg.ModuleRoot, pkg.PackagePath)
-			if err == nil {
-				relPkg, err := filepath.Rel(repoRoot, pkgDir)
-				if err == nil {
-					relPkg = filepath.ToSlash(relPkg)
-					prefix := relPkg + "/"
-					isStale := false
-					for f := range changedFiles {
-						f = filepath.ToSlash(f)
-						if f == relPkg || strings.HasPrefix(f, prefix) {
-							isStale = true
-							break
-						}
-					}
-					if isStale {
-						stale = append(stale, pkg.PackagePath)
-					}
-					continue
-				}
+		handled, isStale := pkgStaleViaFastPath(pkg, fast)
+		if handled {
+			if isStale {
+				stale = append(stale, pkg.PackagePath)
 			}
+			continue
 		}
-		// Fallback: per-package file-hash check.
 		isStale, err := fileHashFallbackStore(rs, pkg.ModuleRoot, pkg.PackagePath)
 		if err != nil || isStale {
 			stale = append(stale, pkg.PackagePath)
@@ -399,52 +432,51 @@ func fileHashFallbackStore(rs store.ReadStore, moduleRoot, packagePath string) (
 	if len(files) == 0 {
 		return true, nil
 	}
+	if hasNewProductionFiles(moduleRoot, packagePath, packageFileSetByBase(files)) {
+		return true, nil
+	}
+	stale, complete := comparePerFileHashesStore(files)
+	if stale {
+		return true, nil
+	}
+	if complete {
+		return false, nil
+	}
+	return comparePackageHashFromStore(rs, ctx, moduleRoot, packagePath, files)
+}
 
-	storedSet := make(map[string]bool, len(files))
+func packageFileSetByBase(files []store.PackageFile) map[string]bool {
+	s := make(map[string]bool, len(files))
 	for _, f := range files {
-		storedSet[filepath.Base(f.FilePath)] = true
+		s[filepath.Base(f.FilePath)] = true
 	}
+	return s
+}
 
-	pkgDir, err := packageDir(moduleRoot, packagePath)
-	if err != nil {
-		return true, nil
-	}
-	diskFiles, err := listGoFiles(pkgDir)
-	if err != nil {
-		return true, nil
-	}
-	for _, df := range diskFiles {
-		base := filepath.Base(df)
-		if !storedSet[base] && !strings.HasSuffix(base, "_test.go") {
-			return true, nil
-		}
-	}
-
+func comparePerFileHashesStore(files []store.PackageFile) (stale, complete bool) {
 	for _, f := range files {
 		if f.FileHash == "" {
-			goto packageHash
+			return false, false
 		}
 		currentHash, err := hashFile(f.FilePath)
-		if err != nil {
-			return true, nil
-		}
-		if currentHash != f.FileHash {
-			return true, nil
+		if err != nil || currentHash != f.FileHash {
+			return true, true
 		}
 	}
-	return false, nil
+	return false, true
+}
 
-packageHash:
+func comparePackageHashFromStore(rs store.ReadStore, ctx context.Context, moduleRoot, packagePath string, files []store.PackageFile) (bool, error) {
 	storedHash, err := rs.StoredFilesHash(ctx, moduleRoot, packagePath)
 	if err != nil || storedHash == "" {
 		return true, nil
 	}
-	var storedPaths []string
+	paths := make([]string, 0, len(files))
 	for _, f := range files {
-		storedPaths = append(storedPaths, f.FilePath)
+		paths = append(paths, f.FilePath)
 	}
-	sort.Strings(storedPaths)
-	currentHash, err := ComputeFilesHash(storedPaths)
+	sort.Strings(paths)
+	currentHash, err := ComputeFilesHash(paths)
 	if err != nil {
 		return true, nil
 	}
