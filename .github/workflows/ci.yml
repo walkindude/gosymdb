@@ -40,6 +40,34 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
+  coverage:
+    # Coverage gate scoped to the logic packages (indexer + store/sqlite).
+    # internal/cmd/ is glue (Cobra + IO) and is exercised by the testbench
+    # job above — gating it here would push tests toward shallow shape-checks
+    # that boost the number without catching real bugs.
+    #
+    # Threshold: 65% (current is ~70%, leaves headroom for refactors that
+    # temporarily dip coverage while landing).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Coverage (indexer + store)
+        run: |
+          go test ./indexer/... ./store/... -coverprofile=coverage.out -count=1
+          pct=$(go tool cover -func=coverage.out | awk '/total:/ {print $3}' | tr -d '%')
+          echo "Coverage: ${pct}%"
+          awk -v pct="$pct" 'BEGIN { exit (pct+0 < 65) ? 1 : 0 }' || {
+            echo "Coverage ${pct}% is below 65% threshold" >&2
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
   lint:
     runs-on: ubuntu-latest
     steps:
