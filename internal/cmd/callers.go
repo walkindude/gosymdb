@@ -167,12 +167,7 @@ func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 	if countOnly && explain {
 		return errors.New("--count and --explain cannot be used together")
 	}
-	if depth < 1 {
-		depth = 1
-	}
-	if depth > 10 {
-		depth = 10
-	}
+	depth = clampCallersDepth(depth)
 
 	if autoReindex {
 		checkAndAutoReindex(db, false, false)
@@ -182,61 +177,26 @@ func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 	var resolveNote string
 	symbol, resolveNote = resolveSymbolInput(db, symbol, pkg)
 
-	var explainData *explainPayload
-	if explain {
-		explainData = &explainPayload{
-			Command:        "callers",
-			Input:          rawSymbol,
-			ResolvedSymbol: symbol,
-			Resolution:     resolveNote,
-			Filters: map[string]any{
-				"pkg":                pkg,
-				"include_unresolved": includeUnresolved,
-				"is_test":            isTest,
-				"fuzzy":              fuzzy,
-			},
-			Traversal: map[string]any{
-				"depth": depth,
-				"limit": limit,
-				"search_mode": map[string]any{
-					"exact_first":                        true,
-					"fuzzy_fallback_when_exact_has_none": fuzzy,
-				},
-			},
-			Notes: []string{
-				"pkg filter applies to caller package paths",
-				"depth controls BFS hops over callers",
-			},
-		}
-	}
+	explainData := buildCallersExplain(explain, rawSymbol, symbol, resolveNote, pkg, includeUnresolved, isTest, fuzzy, depth, limit)
 
 	allCallers, err := buildCallersBFS(rs, symbol, fuzzy, pkg, depth, limit, isTest)
 	if err != nil {
 		return err
 	}
-
-	unresolved := make([]callersUnresolvedRow, 0)
-	if includeUnresolved {
-		ctx := context.Background()
-		urows, err := rs.UnresolvedCallers(ctx, symbol, fuzzy, limit)
-		if err != nil {
-			return err
-		}
-		for _, ur := range urows {
-			r := callersUnresolvedRow{From: ur.From, Expr: ur.Expr, File: ur.File, Line: ur.Line, Col: ur.Col}
-			if asJSON {
-				unresolved = append(unresolved, r)
-			} else {
-				fmt.Printf("%s ~> %s\t%s:%d:%d  [unresolved]\n", r.From, r.Expr, r.File, r.Line, r.Col)
-			}
-		}
+	unresolved, err := collectUnresolvedCallers(rs, symbol, fuzzy, includeUnresolved, limit)
+	if err != nil {
+		return err
 	}
 
+	// Preserve original output ordering: in human mode, unresolved lines stream
+	// before count/callers regardless of --count or --explain.
+	if !asJSON {
+		printCallersUnresolved(unresolved)
+	}
 	if countOnly {
 		fmt.Println(len(allCallers))
 		return nil
 	}
-
 	if asJSON {
 		return formatCallersJSON(db, symbol, resolveNote, dbPath, allCallers, unresolved, depth, explainData)
 	}
@@ -245,11 +205,77 @@ func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 		fmt.Print(formatExplainText(explainData))
 		fmt.Println()
 	}
-
 	if resolveNote != "" {
 		fmt.Printf("# %s\n", resolveNote)
 	}
-	for _, r := range allCallers {
+	printCallers(allCallers, depth)
+	return nil
+}
+
+func clampCallersDepth(d int) int {
+	if d < 1 {
+		return 1
+	}
+	if d > 10 {
+		return 10
+	}
+	return d
+}
+
+func buildCallersExplain(enabled bool, rawSymbol, resolvedSymbol, resolveNote, pkg string, includeUnresolved, isTest, fuzzy bool, depth, limit int) *explainPayload {
+	if !enabled {
+		return nil
+	}
+	return &explainPayload{
+		Command:        "callers",
+		Input:          rawSymbol,
+		ResolvedSymbol: resolvedSymbol,
+		Resolution:     resolveNote,
+		Filters: map[string]any{
+			"pkg":                pkg,
+			"include_unresolved": includeUnresolved,
+			"is_test":            isTest,
+			"fuzzy":              fuzzy,
+		},
+		Traversal: map[string]any{
+			"depth": depth,
+			"limit": limit,
+			"search_mode": map[string]any{
+				"exact_first":                        true,
+				"fuzzy_fallback_when_exact_has_none": fuzzy,
+			},
+		},
+		Notes: []string{
+			"pkg filter applies to caller package paths",
+			"depth controls BFS hops over callers",
+		},
+	}
+}
+
+func collectUnresolvedCallers(rs store.ReadStore, symbol string, fuzzy, include bool, limit int) ([]callersUnresolvedRow, error) {
+	if !include {
+		return []callersUnresolvedRow{}, nil
+	}
+	ctx := context.Background()
+	urows, err := rs.UnresolvedCallers(ctx, symbol, fuzzy, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]callersUnresolvedRow, 0, len(urows))
+	for _, ur := range urows {
+		out = append(out, callersUnresolvedRow{From: ur.From, Expr: ur.Expr, File: ur.File, Line: ur.Line, Col: ur.Col})
+	}
+	return out, nil
+}
+
+func printCallersUnresolved(rows []callersUnresolvedRow) {
+	for _, r := range rows {
+		fmt.Printf("%s ~> %s\t%s:%d:%d  [unresolved]\n", r.From, r.Expr, r.File, r.Line, r.Col)
+	}
+}
+
+func printCallers(rows []callerRow, depth int) {
+	for _, r := range rows {
 		marker := ""
 		if r.Kind == "ref" {
 			marker = "  [func-ref]"
@@ -260,5 +286,4 @@ func execCallers(rs store.ReadStore, db *sql.DB, symbol string, limit int, fuzzy
 		}
 		fmt.Printf("%s -> %s\t%s:%d:%d%s%s\n", r.From, r.To, r.File, r.Line, r.Col, marker, depthSuffix)
 	}
-	return nil
 }
