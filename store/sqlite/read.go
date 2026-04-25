@@ -139,9 +139,47 @@ func buildFindWhere(opts store.FindOpts) (string, []any) {
 // ---- DefSymbol ----
 
 func (s *SQLiteStore) DefSymbol(ctx context.Context, name, pkg string) ([]store.SymbolRow, error) {
-	const cols = `SELECT fqname, kind, file_path, line, col, signature, package_path FROM symbols`
+	scan := s.symbolScanner(ctx)
 
-	scanRows := func(q string, args ...any) ([]store.SymbolRow, error) {
+	results, err := scanByFqname(scan, name, pkg)
+	if err != nil {
+		return nil, fmt.Errorf("DefSymbol fqname lookup: %w", err)
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
+	if base := stripInstantiationArgs(name); base != name {
+		results, err = scanByFqname(scan, base, pkg)
+		if err != nil {
+			return nil, fmt.Errorf("DefSymbol normalized fqname lookup: %w", err)
+		}
+		if len(results) > 0 {
+			return results, nil
+		}
+	}
+
+	results, err = scanByName(scan, name, pkg)
+	if err != nil {
+		return nil, fmt.Errorf("DefSymbol name lookup: %w", err)
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
+	if base := stripInstantiationArgs(name); base != name {
+		results, err = scanByName(scan, base, pkg)
+		if err != nil {
+			return nil, fmt.Errorf("DefSymbol normalized name lookup: %w", err)
+		}
+	}
+	return results, nil
+}
+
+const defSymbolCols = `SELECT fqname, kind, file_path, line, col, signature, package_path FROM symbols`
+
+type symbolScanFn func(q string, args ...any) ([]store.SymbolRow, error)
+
+func (s *SQLiteStore) symbolScanner(ctx context.Context) symbolScanFn {
+	return func(q string, args ...any) ([]store.SymbolRow, error) {
 		rows, err := s.db.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, err
@@ -158,62 +196,27 @@ func (s *SQLiteStore) DefSymbol(ctx context.Context, name, pkg string) ([]store.
 		}
 		return results, rows.Err()
 	}
+}
 
-	// 1. Exact fqname match.
-	q := cols + ` WHERE fqname = ?`
-	qargs := []any{name}
+func scanByFqname(scan symbolScanFn, name, pkg string) ([]store.SymbolRow, error) {
+	q := defSymbolCols + ` WHERE fqname = ?`
+	args := []any{name}
 	if pkg != "" {
 		q += ` AND package_path LIKE ?`
-		qargs = append(qargs, pkg+"%")
+		args = append(args, pkg+"%")
 	}
-	results, err := scanRows(q, qargs...)
-	if err != nil {
-		return nil, fmt.Errorf("DefSymbol fqname lookup: %w", err)
-	}
-	if len(results) == 0 {
-		baseName := stripInstantiationArgs(name)
-		if baseName != name {
-			qargs = []any{baseName}
-			if pkg != "" {
-				qargs = append(qargs, pkg+"%")
-			}
-			results, err = scanRows(q, qargs...)
-			if err != nil {
-				return nil, fmt.Errorf("DefSymbol normalized fqname lookup: %w", err)
-			}
-		}
-	}
+	return scan(q, args...)
+}
 
-	// 2. Exact name match (may be ambiguous).
-	if len(results) == 0 {
-		q = cols + ` WHERE name = ?`
-		qargs = []any{name}
-		if pkg != "" {
-			q += ` AND package_path LIKE ?`
-			qargs = append(qargs, pkg+"%")
-		}
-		q += ` ORDER BY fqname LIMIT 20`
-		results, err = scanRows(q, qargs...)
-		if err != nil {
-			return nil, fmt.Errorf("DefSymbol name lookup: %w", err)
-		}
-		if len(results) == 0 {
-			baseName := stripInstantiationArgs(name)
-			if baseName != name {
-				qargs = []any{baseName}
-				if pkg != "" {
-					qargs = append(qargs, pkg+"%")
-				}
-				qargs = append(qargs, 20)
-				results, err = scanRows(q, qargs...)
-				if err != nil {
-					return nil, fmt.Errorf("DefSymbol normalized name lookup: %w", err)
-				}
-			}
-		}
+func scanByName(scan symbolScanFn, name, pkg string) ([]store.SymbolRow, error) {
+	q := defSymbolCols + ` WHERE name = ?`
+	args := []any{name}
+	if pkg != "" {
+		q += ` AND package_path LIKE ?`
+		args = append(args, pkg+"%")
 	}
-
-	return results, nil
+	q += ` ORDER BY fqname LIMIT 20`
+	return scan(q, args...)
 }
 
 // ---- ListPackages ----
