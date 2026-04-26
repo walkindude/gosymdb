@@ -8,6 +8,8 @@
 
 A Go symbol and call-graph database backed by SQLite. Index any Go module and query symbols, callers, callees, blast radius, dead code, interface implementors, and type references — all with structured JSON output designed for programmatic consumption.
 
+> Project page: <https://projects.mioli.dev/gosymdb/> · Blog: <https://blog.mioli.dev> · Author: [Stefano Mioli](https://mioli.dev)
+
 ## What this is
 
 gosymdb is a local, Go-specific symbolic query CLI for coding agents. It uses Go's own package/type analysis (`go/packages`, `go/types` — the same loader the compiler uses) to build a persistent SQLite index, then answers repeatable JSON queries such as:
