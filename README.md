@@ -45,7 +45,7 @@ The cask strips macOS Gatekeeper's quarantine flag post-install so the binary ru
 go install github.com/walkindude/gosymdb@latest
 ```
 
-Requires Go 1.26+.
+Requires Go 1.26+ on your machine, since this path builds gosymdb from source. The other install methods in this section (Homebrew, scripted installer, Nix, Linux packages) ship pre-compiled binaries and have no Go dependency at install or runtime.
 
 ### Linux packages (deb / rpm / apk)
 
