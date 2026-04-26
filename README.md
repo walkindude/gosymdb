@@ -90,15 +90,17 @@ gosymdb blast-radius --symbol 'github.com/you/repo/pkg.MyFunc' --depth 5 --json
 
 ## Use with Claude Code (MCP)
 
-gosymdb exposes a self-describing manifest (`gosymdb cli-bridge-manifest`) that the [cli-bridge plugin](https://github.com/walkindude/cli-bridge) turns into first-class MCP tools. Once set up, your agent can call `gosymdb_callers`, `gosymdb_blast-radius`, `gosymdb_implementors` etc. directly — no grep fallbacks, structured output, typed answers.
+gosymdb exposes a self-describing manifest (`gosymdb cli-bridge-manifest`) that the [cli-bridge plugin](https://github.com/walkindude/cli-bridge) turns into first-class MCP tools. Once set up, agents can call `gosymdb_callers`, `gosymdb_blast-radius`, `gosymdb_implementors` etc. as MCP tools — typed inputs, structured outputs, no `grep` fallback.
+
+This is the recommended path for agentic use. Agents lose track of CLI tools mentioned only in `CLAUDE.md` once the conversation gets long; MCP tools live in the agent's tool registry and don't decay under context pressure. (For background on why, see [cli-bridge's "The problem" section](https://github.com/walkindude/cli-bridge#the-problem).)
 
 **Three steps:**
 
-1. `go install github.com/walkindude/gosymdb@latest` (or use the installer above).
-2. Inside Claude Code: `/plugin marketplace add walkindude/cli-bridge && /plugin install cli-bridge@cli-bridge`.
+1. `go install github.com/walkindude/gosymdb@latest` (or use the installer above; install.sh auto-generates the cli-bridge spec when Claude Code is detected, in which case skip step 3).
+2. Install cli-bridge — either as a plugin (`/plugin marketplace add walkindude/cli-bridge && /plugin install cli-bridge@cli-bridge`) or standalone (`npm i -g cli-bridge && claude mcp add cli-bridge -s user -- cli-bridge`).
 3. Inside Claude Code: `/cli-bridge:register gosymdb` (uses the canonical `cli-bridge-manifest` subcommand — no `--help` scraping).
 
-Restart Claude Code and all `gosymdb_*` tools appear in the MCP tool list.
+Restart Claude Code and all `gosymdb_*` tools appear in the MCP tool list. After upgrading the gosymdb binary, cli-bridge [auto-refreshes](https://github.com/walkindude/cli-bridge/blob/master/AGENTS.md#the-manifest-convention) the spec on its next startup — no manual re-register.
 
 ## Commands
 
