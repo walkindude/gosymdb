@@ -1,47 +1,93 @@
 name: Dependabot auto-merge
 
-# Auto-merges low-risk Dependabot PRs once required status checks pass:
+# Auto-merges low-risk Dependabot PRs once CI is green:
 #   - gomod patch bumps
 #   - GitHub Actions patch + minor
-#
 # Everything else (gomod minor/major, actions majors) falls through to
-# manual review. Required status checks (configured in branch protection)
-# gate the merge, so no PR lands without CI green.
+# manual review.
+#
+# Why two jobs instead of `gh pr merge --auto`: GitHub's native auto-merge
+# is unavailable on PRIVATE repos on the free plan, so `--auto` silently
+# fails and Dependabot PRs pile up. Instead:
+#   1. `label` (pull_request_target) — fetch-metadata can only read bump
+#      metadata in a PR-context event, so we gate here and tag low-risk PRs
+#      with the `dependabot-automerge` label.
+#   2. `merge` (workflow_run, after `CI` succeeds) — does a plain
+#      `gh pr merge --squash` on labeled Dependabot PRs. Plain merge needs
+#      no native auto-merge, so it works on private and public repos alike.
+#
+# Both jobs gate on `pull_request.user.login == 'dependabot[bot]'`, NOT
+# `github.actor`: a human `@dependabot rebase` makes the actor the commenter
+# while the PR author stays Dependabot. Dependabot PRs come from branches in
+# this repo (not forks) and `dependabot[bot]` is GitHub-authoritative.
+#
+# This repo groups Dependabot updates (gomod-patch = patch only, actions =
+# patch + minor). For a grouped PR fetch-metadata reports the HIGHEST semver
+# bump in the group, so gating on `update-type` here keeps majors out even
+# when a group collapses several bumps into one PR.
 
-on: pull_request_target
+on:
+  pull_request_target:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  auto-merge:
-    # Check the PR author, not github.actor. When a human comments
-    # `@dependabot rebase`, the synchronize event's actor is the commenter,
-    # not Dependabot — so `github.actor` fails for human-triggered rebases
-    # even though the PR is still Dependabot's.
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+  # Step 1 — gate on Dependabot metadata and label low-risk PRs.
+  label:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Fetch Dependabot metadata
         id: meta
         uses: dependabot/fetch-metadata@v3
 
-      - name: Enable auto-merge for gomod patch
-        if: |
-          steps.meta.outputs.package-ecosystem == 'gomod' &&
-          steps.meta.outputs.update-type == 'version-update:semver-patch'
-        run: gh pr merge --auto --squash "$PR_URL"
+      - name: Label low-risk bumps for auto-merge
+        if: >-
+          (steps.meta.outputs.package-ecosystem == 'gomod' &&
+           steps.meta.outputs.update-type == 'version-update:semver-patch') ||
+          (steps.meta.outputs.package-ecosystem == 'github_actions' &&
+           (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+            steps.meta.outputs.update-type == 'version-update:semver-minor'))
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create dependabot-automerge \
+            --color 0e8a16 --description "Merge automatically once CI passes" \
+            2>/dev/null || true
+          gh pr edit "$PR_URL" --add-label dependabot-automerge
 
-      - name: Enable auto-merge for GitHub Actions patch/minor
-        if: |
-          steps.meta.outputs.package-ecosystem == 'github_actions' &&
-          (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
-           steps.meta.outputs.update-type == 'version-update:semver-minor')
-        run: gh pr merge --auto --squash "$PR_URL"
+  # Step 2 — once `CI` is green, merge the labeled Dependabot PR.
+  merge:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge labeled Dependabot PR
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          pr=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+                 --json number,author,labels \
+                 --jq '.[0]
+                       | select(.author.login == "dependabot[bot]")
+                       | select(any(.labels[].name; . == "dependabot-automerge"))
+                       | .number')
+          if [ -z "$pr" ]; then
+            echo "No eligible labeled Dependabot PR for $BRANCH; nothing to merge."
+            exit 0
+          fi
+          echo "Merging PR #$pr ($BRANCH)"
+          gh pr merge "$pr" --repo "$REPO" --squash --delete-branch
