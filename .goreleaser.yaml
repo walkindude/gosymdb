@@ -45,10 +45,6 @@ homebrew_casks:
     directory: Casks
     homepage: "https://github.com/walkindude/gosymdb"
     description: "Go symbol and call-graph database backed by SQLite"
-    # Tell brew the download origin is trusted — suppresses the "verified:"
-    # prompt on unnotarized binaries.
-    url:
-      verified: github.com/walkindude/gosymdb
     # Strip macOS Gatekeeper's quarantine flag on install, so users don't
     # have to right-click → Open on first run. The CLI is unsigned
     # (no Apple Developer Program subscription), so this is the accepted
