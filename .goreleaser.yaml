@@ -49,12 +49,22 @@ homebrew_casks:
     # have to right-click → Open on first run. The CLI is unsigned
     # (no Apple Developer Program subscription), so this is the accepted
     # workaround; users who want signed binaries can compile from source.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/gosymdb"]
-          end
+    #
+    # Homebrew 7.0 deprecated the Ruby `postflight` block that hooks.post.install
+    # generates, in favour of the declarative `postflight_steps` stanza
+    # (goreleaser/goreleaser#6870, milestoned for v2.19.0). Until goreleaser
+    # emits it, custom_block injects the stanza. goreleaser templates the
+    # rendered cask, so the braces of Homebrew's {{staged_path}} token are
+    # escaped. must_succeed: false because the attribute is absent when the
+    # cask is installed with --no-quarantine, and xattr -d then errors.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr",
+              args:         ["-dr", "com.apple.quarantine", "{{ "{{" }}staged_path{{ "}}" }}/gosymdb"],
+              must_succeed: false
+        end
+      end
 
 nfpms:
   - id: gosymdb
